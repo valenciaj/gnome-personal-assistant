@@ -2,6 +2,7 @@
 
 mod conversations;
 mod notes;
+mod reminders;
 mod todos;
 
 use std::rc::Rc;
@@ -19,6 +20,8 @@ pub struct Ctx {
     pub store: Store,
     pub commands: async_channel::Sender<Command>,
     pub window: adw::ApplicationWindow,
+    /// Configuración de transcripción vigente (para grabar audios desde el explorador).
+    pub stt: Rc<dyn Fn() -> crate::config::SttConfig>,
     toasts: adw::ToastOverlay,
 }
 
@@ -79,6 +82,7 @@ pub struct Explorer {
     stack: adw::ViewStack,
     conversations: Rc<conversations::Page>,
     notes: Rc<notes::Page>,
+    reminders: Rc<reminders::Page>,
     todos: Rc<todos::Page>,
 }
 
@@ -94,14 +98,18 @@ impl Explorer {
             .hide_on_close(true)
             .build();
         let toasts = adw::ToastOverlay::new();
-        let ctx = Ctx { store, commands, window: window.clone(), toasts: toasts.clone() };
+        let stt: Rc<dyn Fn() -> crate::config::SttConfig> =
+            Rc::new(|| crate::config::Config::load().map(|c| c.stt).unwrap_or_default());
+        let ctx = Ctx { store, commands, window: window.clone(), stt, toasts: toasts.clone() };
 
         let conversations = conversations::Page::new(ctx.clone());
         let notes = notes::Page::new(ctx.clone());
+        let reminders = reminders::Page::new(ctx.clone());
         let todos = todos::Page::new(ctx.clone());
 
         let stack = adw::ViewStack::new();
         stack.add_titled_with_icon(notes.widget(), Some("notes"), &tr("Notas"), "accessories-text-editor-symbolic");
+        stack.add_titled_with_icon(reminders.widget(), Some("reminders"), &tr("Recordatorios"), "alarm-symbolic");
         stack.add_titled_with_icon(todos.widget(), Some("todos"), &tr("Tareas"), "object-select-symbolic");
         stack.add_titled_with_icon(
             conversations.widget(),
@@ -125,7 +133,7 @@ impl Explorer {
         toasts.set_child(Some(&toolbar));
         window.set_content(Some(&toasts));
 
-        let this = Rc::new(Self { window, stack, conversations, notes, todos });
+        let this = Rc::new(Self { window, stack, conversations, notes, reminders, todos });
         // Al volver a la ventana, recoger lo que haya cambiado la IA mientras tanto.
         this.window.connect_is_active_notify(glib::clone!(
             #[weak]
@@ -154,6 +162,7 @@ impl Explorer {
         let list = match name {
             "notes" => self.notes.list(),
             "todos" => self.todos.list(),
+            "reminders" => self.reminders.list(),
             _ => self.conversations.list(),
         };
         if let Some(row) = list.row_at_index(if name == "todos" { 1 } else { 0 }) {
@@ -172,6 +181,7 @@ impl Explorer {
         }
         self.conversations.refresh();
         self.notes.refresh();
+        self.reminders.refresh();
         self.todos.refresh();
     }
 }

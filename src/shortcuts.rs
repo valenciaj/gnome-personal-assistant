@@ -17,6 +17,7 @@ use crate::i18n::tr;
 
 pub const RECORD: &str = "record";
 pub const REOPEN: &str = "reopen";
+pub const CAPTURE: &str = "capture";
 
 /// Sesión viva del portal; se necesita para abrir el diálogo de configuración.
 pub struct Shortcuts {
@@ -43,7 +44,7 @@ impl Shortcuts {
             .await?
             .response()?;
         let known = |id: &str| existing.shortcuts().iter().any(|s| s.id() == id);
-        let bound = if known(RECORD) && known(REOPEN) {
+        let bound = if known(RECORD) && known(REOPEN) && known(CAPTURE) {
             existing
                 .shortcuts()
                 .iter()
@@ -55,6 +56,8 @@ impl Shortcuts {
                     .preferred_trigger("LOGO+ALT+space"),
                 NewShortcut::new(REOPEN, tr("Reabrir la última conversación"))
                     .preferred_trigger("LOGO+ALT+r"),
+                NewShortcut::new(CAPTURE, tr("Capturar la pantalla y preguntar"))
+                    .preferred_trigger("LOGO+ALT+s"),
             ];
             portal
                 .bind_shortcuts(&session, &shortcuts, None, BindShortcutsOptions::default())
@@ -81,6 +84,7 @@ impl Shortcuts {
                 let command = match event.shortcut_id() {
                     RECORD => Command::ShortcutPressed { token },
                     REOPEN => Command::Reopen,
+                    CAPTURE => Command::CaptureAndAsk { token },
                     _ => continue,
                 };
                 if tx.send(command).await.is_err() {

@@ -40,8 +40,9 @@ sudo apt install build-essential pkg-config libgtk-4-dev libadwaita-1-dev \
 ./target/debug/gnome-personal-assistant
 ```
 
-La primera vez GNOME pide confirmar los atajos globales
-(por defecto **Super+Alt+Espacio** para grabar y **Super+Alt+R** para reabrir).
+La primera vez GNOME pide confirmar los atajos globales: **Super+Alt+Espacio** para
+grabar, **Super+Alt+S** para capturar la pantalla y grabar, y **Super+Alt+R** para
+reabrir la última conversación.
 
 ## Configuración
 

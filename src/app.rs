@@ -5,6 +5,7 @@
 //! runtime de tokio y se esperan desde aquí con `runtime().spawn(...).await`.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -18,11 +19,12 @@ use crate::audio::{self, Recorder, Sound};
 use crate::config::{self, AudioRetention, Config, LlmProvider, RecordingMode};
 use crate::explorer::Explorer;
 use crate::indicator::Indicator;
+use crate::reminder_window::ReminderWindow;
 use crate::llm::{self, DisplayItem};
 use crate::popup::Popup;
 use crate::runtime::runtime;
 use crate::shortcuts::Shortcuts;
-use crate::store::{MessageKind, MessageRecord, Store};
+use crate::store::{AttachmentKind, MessageKind, MessageRecord, NewAttachment, Owner, Store};
 use crate::tools::{self, Toolbox, TurnContext};
 use crate::tray::{self, TrayHandle, TrayState};
 use crate::i18n::{tr, trf};
@@ -51,9 +53,19 @@ pub enum Command {
     ShowPreferences,
     /// Se ha guardado la configuración desde las preferencias.
     ConfigChanged,
-    /// Botones de la notificación de un recordatorio.
+    /// Botones de la notificación del aviso de una tarea.
     TodoDone(i64),
     TodoSnooze(i64),
+    /// Recordatorios: hecho, posponer (con la opción elegida; `None` = la primera) y mostrar.
+    ReminderDone(i64),
+    ReminderSnooze(i64, Option<String>),
+    ShowReminder(i64),
+    /// Atajo «capturar y preguntar»: captura de pantalla y empieza a grabar.
+    CaptureAndAsk { token: Option<String> },
+    /// Imágenes adjuntas en el popup que irán con el próximo mensaje.
+    AddPending(NewAttachment),
+    RemovePending(usize),
+    AttachmentError(String),
     RecordingFailed(String),
     /// Una tool quiere borrar algo y espera la respuesta del usuario.
     ConfirmDeletion { question: String, reply: async_channel::Sender<bool> },
@@ -108,8 +120,6 @@ impl Conversation {
 
 /// Resultado de un turno del agente.
 struct TurnOutcome {
-    /// Una nota se ha quedado con el audio del mensaje.
-    audio_used: bool,
     error: Option<String>,
 }
 
@@ -122,6 +132,9 @@ pub struct Controller {
     conversation: RefCell<Option<Conversation>>,
     popup: Popup,
     indicator: Rc<Indicator>,
+    /// Adjuntos preparados en el popup para el próximo mensaje.
+    pending: RefCell<Vec<NewAttachment>>,
+    reminder_windows: RefCell<HashMap<i64, Rc<ReminderWindow>>>,
     tray: RefCell<Option<TrayHandle>>,
     shortcuts: RefCell<Option<Arc<Shortcuts>>>,
     explorer: RefCell<Option<Rc<Explorer>>>,
@@ -147,6 +160,8 @@ impl Controller {
             app: app.clone(),
             popup: Popup::new(app, commands.clone()),
             indicator: Indicator::new(app, commands.clone()),
+            pending: RefCell::default(),
+            reminder_windows: RefCell::default(),
             commands,
             store,
             config: RefCell::new(config),
@@ -260,6 +275,76 @@ impl Controller {
             Command::AutoStop | Command::StopRecording => self.stop_recording(),
             Command::CancelRecording => self.cancel_recording(),
             Command::ConfigChanged => self.reload_config(),
+            Command::AddPending(attachment) => {
+                self.pending.borrow_mut().push(attachment);
+                self.popup.set_pending(&self.pending.borrow());
+                self.present_popup();
+            }
+            Command::RemovePending(index) => {
+                let mut pending = self.pending.borrow_mut();
+                if index < pending.len() {
+                    pending.remove(index);
+                }
+                self.popup.set_pending(&pending);
+            }
+            Command::AttachmentError(message) => {
+                self.present_popup();
+                self.popup.view().add_error(&message);
+            }
+            Command::CaptureAndAsk { token } => {
+                if !matches!(*self.phase.borrow(), Phase::Idle) {
+                    return;
+                }
+                glib::spawn_future_local(glib::clone!(
+                    #[strong(rename_to = this)]
+                    self,
+                    async move {
+                        match crate::attachments::screenshot().await {
+                            Ok(image) => {
+                                this.pending.borrow_mut().push(image);
+                                this.popup.set_pending(&this.pending.borrow());
+                                *this.activation_token.borrow_mut() = token;
+                                this.start_recording(Target::NewConversation);
+                            }
+                            // Cancelar la captura no es un error que haya que mostrar.
+                            Err(err) => log::info!("Captura cancelada o fallida: {err:#}"),
+                        }
+                    }
+                ));
+            }
+            Command::ReminderDone(id) => {
+                self.close_reminder(id);
+                match self.store.complete_reminder(id) {
+                    Ok(reminder) if !reminder.done => self.notify_info(&trf(
+                        "Siguiente aviso de «{title}»: {date}",
+                        &[("title", &reminder.title), ("date", &crate::explorer::local_time(reminder.due_at))],
+                    )),
+                    Ok(_) => {}
+                    Err(err) => log::error!("{err:#}"),
+                }
+                self.refresh_explorer();
+            }
+            Command::ReminderSnooze(id, option) => {
+                self.close_reminder(id);
+                let (options, default_time) = {
+                    let r = &self.config.borrow().reminders;
+                    (r.snooze.clone(), crate::reminders::parse_default_time(&r.default_time))
+                };
+                let option = option.or_else(|| options.first().cloned()).unwrap_or_else(|| "10m".into());
+                let now = chrono::Utc::now().timestamp();
+                let until = crate::reminders::snooze_until(&option, now, default_time).unwrap_or(now + 600);
+                if let Err(err) = self.store.snooze_reminder(id, until) {
+                    log::error!("{err:#}");
+                }
+                self.refresh_explorer();
+            }
+            Command::ShowReminder(id) => {
+                let existing = self.reminder_windows.borrow().get(&id).cloned();
+                match existing {
+                    Some(window) => window.present(),
+                    None => self.open_reminder(id, false),
+                }
+            }
             Command::TodoDone(id) => {
                 self.app.withdraw_notification(&format!("todo-{id}"));
                 if let Err(err) = self.store.set_todo_done(id, true) {
@@ -369,7 +454,7 @@ impl Controller {
             *next += 1;
             *next
         };
-        let path = config::audio_dir().join(format!("rec-{}.ogg", chrono::Local::now().format("%Y%m%d-%H%M%S")));
+        let path = config::audio_dir().join(format!("rec-{}.ogg", chrono::Local::now().format("%Y%m%d-%H%M%S-%3f")));
         let weak = Rc::downgrade(self);
         let errors = self.commands.clone();
         let (device, sounds, show_indicator) = {
@@ -515,41 +600,35 @@ impl Controller {
         }
     }
 
-    /// Envía un mensaje del usuario (con su audio, si lo dictó) y muestra la respuesta.
+    /// Envía un mensaje del usuario (con su audio, si lo dictó, y las imágenes
+    /// pendientes) y muestra la respuesta.
     async fn ask(self: Rc<Self>, text: String, audio: Option<PathBuf>) {
         *self.phase.borrow_mut() = Phase::Processing;
         self.set_tray(TrayState::Busy);
-        let config = self.config.borrow().clone();
-        let kept_audio = audio
-            .as_ref()
-            .filter(|_| config.audio.retention == AudioRetention::Always)
-            .map(|p| p.to_string_lossy().into_owned());
-        self.popup.view().add_user(&text, kept_audio.as_deref());
         self.popup.set_status(Some(&tr("Pensando…")));
 
-        let outcome = self.run_turn(&config, &text, audio.as_deref()).await;
-        let outcome = outcome.unwrap_or_else(|err| TurnOutcome { audio_used: false, error: Some(format!("{err:#}")) });
-
+        let config = self.config.borrow().clone();
+        let mut attachments = std::mem::take(&mut *self.pending.borrow_mut());
+        self.popup.set_pending(&[]);
         if let Some(path) = &audio {
-            let keep = outcome.audio_used || config.audio.retention == AudioRetention::Always;
-            if !keep {
-                let _ = std::fs::remove_file(path);
-            }
+            attachments.insert(0, crate::attachments::audio_attachment(path, Some(text.clone())));
         }
+        let outcome = self.run_turn(&config, &text, attachments).await;
+        let outcome = outcome.unwrap_or_else(|err| TurnOutcome { error: Some(format!("{err:#}")) });
         match outcome.error {
             None => self.finish(TrayState::Idle),
             Some(error) => self.fail(&error),
         }
-        // La IA puede haber cambiado notas o tareas.
+        // La IA puede haber cambiado notas, tareas o recordatorios.
         self.refresh_explorer();
     }
 
-    async fn run_turn(&self, config: &Config, text: &str, audio: Option<&Path>) -> anyhow::Result<TurnOutcome> {
+    async fn run_turn(&self, config: &Config, text: &str, attachments: Vec<NewAttachment>) -> anyhow::Result<TurnOutcome> {
         let mut conversation = match self.conversation.borrow_mut().take() {
             Some(conversation) => conversation,
             None => Conversation::new(config)?,
         };
-        let outcome = self.run_turn_in(&mut conversation, config, text, audio).await;
+        let outcome = self.run_turn_in(&mut conversation, text, attachments).await;
         *self.conversation.borrow_mut() = Some(conversation);
         outcome
     }
@@ -557,11 +636,9 @@ impl Controller {
     async fn run_turn_in(
         &self,
         conversation: &mut Conversation,
-        config: &Config,
         text: &str,
-        audio: Option<&Path>,
+        attachments: Vec<NewAttachment>,
     ) -> anyhow::Result<TurnOutcome> {
-        let audio = audio.map(|p| p.to_string_lossy().into_owned());
         let id = match conversation.id {
             Some(id) => id,
             None => {
@@ -571,32 +648,53 @@ impl Controller {
                 id
             }
         };
-        let mut user = MessageRecord::new(MessageKind::User, text);
-        if config.audio.retention == AudioRetention::Always {
-            user.audio_path = audio.clone();
+        // El mensaje y sus adjuntos se guardan siempre; la limpieza decide luego qué
+        // audios del historial se borran (ver `clean_files`).
+        let message_id = self.store.add_message(id, &MessageRecord::new(MessageKind::User, text))?;
+        let mut attachment_ids = Vec::new();
+        for attachment in &attachments {
+            attachment_ids.push(self.store.add_attachment(Owner::Message(message_id), attachment)?);
         }
-        self.store.add_message(id, &user)?;
+        let saved = self.store.attachments(Owner::Message(message_id))?;
+        self.popup.view().add_user(text, &saved);
+
+        // Al modelo: las imágenes y una línea con los ids de los adjuntos, para que
+        // pueda elegirlos al crear notas o recordatorios.
+        let mut model_text = text.to_owned();
+        if !saved.is_empty() {
+            let list: Vec<String> = saved
+                .iter()
+                .map(|a| match a.kind {
+                    AttachmentKind::Audio => format!("audio #{}", a.id),
+                    AttachmentKind::Image => format!("imagen #{}", a.id),
+                })
+                .collect();
+            model_text.push_str(&format!("\n\n[Adjuntos de este mensaje: {}]", list.join(", ")));
+        }
+        let mut images = Vec::new();
+        for image in saved.iter().filter(|a| a.kind == AttachmentKind::Image) {
+            match crate::attachments::model_image(&image.path) {
+                Ok(image) => images.push(image),
+                Err(err) => log::warn!("{err:#}"),
+            }
+        }
 
         let toolbox = Toolbox::new(
             self.store.clone(),
             self.commands.clone(),
-            TurnContext {
-                conversation_id: Some(id),
-                transcript: audio.is_some().then(|| text.to_owned()),
-                audio_path: audio,
-            },
+            TurnContext { conversation_id: Some(id), attachment_ids },
         );
         let client = conversation.client.clone();
         let system = conversation.system.clone();
         // Se trabaja sobre una copia: si el turno falla, el historial queda como estaba.
         let mut messages = conversation.messages.clone();
-        messages.push(client.user_message(text));
-        let (messages, items, audio_used, result) = runtime()
+        messages.push(client.user_message(&model_text, &images));
+        let (messages, items, result) = runtime()
             .spawn(async move {
                 let mut items = Vec::new();
                 let result =
                     llm::run_agent(&client, &system, &mut messages, &tools::specs(), &toolbox, &mut items).await;
-                (messages, items, toolbox.audio_used(), result)
+                (messages, items, result)
             })
             .await?;
 
@@ -620,7 +718,7 @@ impl Controller {
                 Some(message)
             }
         };
-        Ok(TurnOutcome { audio_used, error })
+        Ok(TurnOutcome { error })
     }
 
     /// Carga una conversación guardada en el popup para seguirla.
@@ -656,7 +754,7 @@ impl Controller {
             let explorer = explorer.clone();
             Rc::new(move || explorer.window().clone().upcast())
         };
-        for page in ["notes", "todos", "conversations"] {
+        for page in ["notes", "reminders", "todos", "conversations"] {
             let e = explorer.clone();
             let w = explorer_window.clone();
             shots.push((page.into(), Box::new(move || e.show_page(page)), Box::new(move || w())));
@@ -681,6 +779,22 @@ impl Controller {
                 }
             }),
             Box::new(move || popup.popup.window().clone().upcast()),
+        ));
+        let this = self.clone();
+        let window = self.clone();
+        shots.push((
+            "reminder-window".into(),
+            Box::new(move || {
+                if let Some(reminder) = this.store.list_reminders(false).ok().and_then(|r| r.into_iter().next()) {
+                    this.open_reminder(reminder.id, false);
+                }
+            }),
+            Box::new(move || {
+                window.reminder_windows.borrow().values().next().map_or_else(
+                    || window.popup.window().clone().upcast(),
+                    |w| w.window().clone().upcast(),
+                )
+            }),
         ));
         let this = self.clone();
         let indicator = self.clone();
@@ -741,7 +855,7 @@ impl Controller {
         }
     }
 
-    /// Notifica las tareas cuyo aviso ha llegado.
+    /// Avisa de los recordatorios y tareas cuya hora ha llegado.
     fn check_reminders(&self) {
         let (enabled, default_time) = {
             let r = &self.config.borrow().reminders;
@@ -749,6 +863,20 @@ impl Controller {
         };
         if !enabled {
             return;
+        }
+        match self.store.reminders_due(chrono::Utc::now().timestamp()) {
+            Ok(reminders) => {
+                for reminder in reminders {
+                    if let Err(err) = self.store.mark_reminder_notified(reminder.id) {
+                        log::error!("{err:#}");
+                    }
+                    self.fire_reminder(&reminder);
+                }
+                if !self.reminder_windows.borrow().is_empty() {
+                    self.refresh_explorer();
+                }
+            }
+            Err(err) => log::error!("Recordatorios: {err:#}"),
         }
         let todos = match self.store.todos_to_remind() {
             Ok(todos) => todos,
@@ -779,16 +907,74 @@ impl Controller {
         }
     }
 
-    /// Borra los audios que no se van a usar: huérfanos de más de una hora y, si se
-    /// ha configurado, los del historial con más de N días. Los de notas nunca.
+    /// Borra los archivos que ya no hacen falta (ver `clean_files`).
     fn clean_audio(&self) {
-        let days = self.config.borrow().audio.delete_after_days;
+        let (retention, days) = {
+            let audio = &self.config.borrow().audio;
+            (audio.retention, audio.delete_after_days)
+        };
         let store = self.store.clone();
         runtime().spawn_blocking(move || {
-            if let Err(err) = clean_audio(&store, days) {
-                log::warn!("Limpieza de audios: {err:#}");
+            if let Err(err) = clean_files(&store, retention, days) {
+                log::warn!("Limpieza de archivos: {err:#}");
             }
         });
+    }
+
+    fn close_reminder(&self, id: i64) {
+        self.app.withdraw_notification(&format!("reminder-{id}"));
+        if let Some(window) = self.reminder_windows.borrow_mut().remove(&id) {
+            window.close();
+        }
+    }
+
+    /// Abre la ventana de un recordatorio, con alarma si acaba de llegar su hora.
+    fn open_reminder(&self, id: i64, ring: bool) {
+        let reminder = match self.store.get_reminder(id) {
+            Ok(reminder) => reminder,
+            Err(err) => return log::error!("{err:#}"),
+        };
+        let (options, default_time, repeat_alarm) = {
+            let r = &self.config.borrow().reminders;
+            (r.snooze.clone(), crate::reminders::parse_default_time(&r.default_time), r.repeat_alarm)
+        };
+        let snooze: Vec<(String, String)> = options
+            .iter()
+            .map(|o| (o.clone(), crate::reminders::snooze_label(o, default_time)))
+            .collect();
+        let alarm = ring.then_some(repeat_alarm);
+        let window = ReminderWindow::show(&self.app, &reminder, &snooze, self.commands.clone(), alarm, None);
+        if let Some(old) = self.reminder_windows.borrow_mut().insert(id, window) {
+            old.close();
+        }
+    }
+
+    /// Notificación y ventana de un recordatorio cuya hora ha llegado.
+    fn fire_reminder(&self, reminder: &crate::store::Reminder) {
+        let notification = gio::Notification::new(&reminder.title);
+        let body = reminder.body.lines().find(|l| !l.trim().is_empty()).unwrap_or_default();
+        notification.set_body(Some(&format!("{} {body}", crate::explorer::local_time(reminder.due_at))));
+        notification.set_priority(gio::NotificationPriority::Urgent);
+        notification.set_default_action_and_target_value("app.reminder-show", Some(&reminder.id.to_variant()));
+        notification.add_button_with_target_value(&tr("Hecho"), "app.reminder-done", Some(&reminder.id.to_variant()));
+        let (first, default_time) = {
+            let r = &self.config.borrow().reminders;
+            (r.snooze.first().cloned(), crate::reminders::parse_default_time(&r.default_time))
+        };
+        if let Some(option) = first {
+            let label = trf("Posponer {time}", &[("time", &crate::reminders::snooze_label(&option, default_time))]);
+            notification.add_button_with_target_value(&label, "app.reminder-snooze", Some(&reminder.id.to_variant()));
+        }
+        self.app.send_notification(Some(&format!("reminder-{}", reminder.id)), &notification);
+        // Solo suena si no llega muy tarde (por ejemplo, con el ordenador apagado).
+        let late = chrono::Utc::now().timestamp() - reminder.due_at;
+        self.open_reminder(reminder.id, late < 600);
+    }
+
+    fn notify_info(&self, message: &str) {
+        let notification = gio::Notification::new(&tr("Asistente"));
+        notification.set_body(Some(message));
+        self.app.send_notification(None, &notification);
     }
 
     fn cancel_recording(&self) {
@@ -856,26 +1042,36 @@ fn record_for(item: &DisplayItem) -> MessageRecord {
     }
 }
 
-fn clean_audio(store: &Store, days: u32) -> anyhow::Result<()> {
-    let dir = config::audio_dir();
-    if !dir.exists() {
-        return Ok(());
-    }
-    let in_notes = store.note_audio_paths()?;
-    let referenced = store.referenced_audio_paths()?;
-    for entry in std::fs::read_dir(dir)? {
-        let path = entry?.path();
-        let key = path.to_string_lossy().into_owned();
-        if in_notes.contains(&key) {
-            continue;
-        }
-        let age = path.metadata()?.modified()?.elapsed().unwrap_or_default();
-        let orphan = !referenced.contains(&key) && age > Duration::from_secs(3600);
-        let expired = days > 0 && age > Duration::from_secs(u64::from(days) * 86_400);
-        if orphan || expired {
-            log::info!("Borrando audio {}", path.display());
-            std::fs::remove_file(&path)?;
-            store.forget_message_audio(&key)?;
+/// Limpieza de archivos de audio e imágenes:
+/// - los de notas y recordatorios no se borran nunca;
+/// - los que no usa nadie (restos de grabaciones descartadas) se borran pasada una hora;
+/// - los audios que solo están en el historial, según la retención: con «solo notas»,
+///   a las 24 horas (da tiempo a convertir la conversación en nota); con «siempre»,
+///   tras `days` días (0 = nunca). Las imágenes del historial se quedan con su conversación.
+fn clean_files(store: &Store, retention: AudioRetention, days: u32) -> anyhow::Result<()> {
+    let kept = store.kept_attachment_paths()?;
+    let referenced = store.attachment_paths()?;
+    let history_limit = match retention {
+        AudioRetention::WithNotes => Some(Duration::from_secs(24 * 3600)),
+        AudioRetention::Always if days > 0 => Some(Duration::from_secs(u64::from(days) * 86_400)),
+        AudioRetention::Always => None,
+    };
+    for (dir, is_audio) in [(config::audio_dir(), true), (config::images_dir(), false)] {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries {
+            let path = entry?.path();
+            let key = path.to_string_lossy().into_owned();
+            if kept.contains(&key) {
+                continue;
+            }
+            let age = path.metadata()?.modified()?.elapsed().unwrap_or_default();
+            let orphan = !referenced.contains(&key) && age > Duration::from_secs(3600);
+            let expired = is_audio && referenced.contains(&key) && history_limit.is_some_and(|limit| age > limit);
+            if orphan || expired {
+                log::info!("Borrando {}", path.display());
+                std::fs::remove_file(&path)?;
+                store.forget_message_file(&key)?;
+            }
         }
     }
     Ok(())

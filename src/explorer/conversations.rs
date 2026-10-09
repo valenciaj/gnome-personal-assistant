@@ -180,18 +180,8 @@ impl Page {
             &tr("Se borran sus mensajes y grabaciones. Las notas y tareas creadas en ella se conservan."),
             &tr("Borrar"),
             move || {
-                let store = &this.ctx.store;
-                let audios: Vec<String> = store
-                    .messages(id)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter_map(|m| m.audio_path)
-                    .collect();
-                if this.ctx.check(store.delete_conversation(id)).is_some() {
-                    let in_notes = store.note_audio_paths().unwrap_or_default();
-                    for audio in audios.iter().filter(|a| !in_notes.contains(*a)) {
-                        let _ = std::fs::remove_file(audio);
-                    }
+                // Sus archivos los borra la limpieza periódica si nada más los usa.
+                if this.ctx.check(this.ctx.store.delete_conversation(id)).is_some() {
                     this.selected.set(None);
                     this.refresh();
                     this.ctx.toast(&tr("Conversación borrada"));

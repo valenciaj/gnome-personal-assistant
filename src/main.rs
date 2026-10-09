@@ -1,6 +1,9 @@
 mod app;
+mod attachments;
+mod attachment_view;
 mod audio;
 mod autostart;
+mod camera;
 mod config;
 mod dev;
 mod conversation_view;
@@ -11,6 +14,8 @@ mod llm;
 mod markdown;
 mod popup;
 mod preferences;
+mod record_dialog;
+mod reminder_window;
 mod reminders;
 mod runtime;
 mod secrets;
@@ -153,7 +158,14 @@ fn add_actions(app: &adw::Application, sender: &async_channel::Sender<Command>) 
         app.add_action(&action);
     }
     // Botones de los recordatorios: llevan el id de la tarea.
-    for (name, command) in [("todo-done", Command::TodoDone as fn(i64) -> Command), ("todo-snooze", Command::TodoSnooze)] {
+    let reminder_snooze = |id| Command::ReminderSnooze(id, None);
+    for (name, command) in [
+        ("todo-done", Command::TodoDone as fn(i64) -> Command),
+        ("todo-snooze", Command::TodoSnooze),
+        ("reminder-done", Command::ReminderDone),
+        ("reminder-snooze", reminder_snooze),
+        ("reminder-show", Command::ShowReminder),
+    ] {
         let action = gio::SimpleAction::new(name, Some(glib::VariantTy::INT64));
         let sender = sender.clone();
         action.connect_activate(move |_, parameter| {

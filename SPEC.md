@@ -105,3 +105,20 @@ Proceso residente con temporizador: al llegar `recordatorio` de un TODO se lanza
 5. **Remate**: recordatorios, i18n (es/en), autoarranque, `.deb` (`cargo-deb`).
 
 Git local con un commit por fase.
+
+## 9. Ampliación: recordatorios y adjuntos (2026-10-09)
+
+- **Adjuntos múltiples** (tabla `attachments`): audios e imágenes en notas, recordatorios y
+  mensajes. Un archivo puede estar en varias filas (el audio de un mensaje copiado a una nota).
+- La IA elige qué adjuntos copiar al crear/editar notas y recordatorios: `attach` =
+  `current` | `conversation` | `selected` (+ `attachment_ids`); `list_conversation_attachments`
+  muestra los de la conversación. Cada mensaje enviado al modelo indica los ids de sus adjuntos.
+- **Recordatorios**: título, texto Markdown, fecha y hora, repetición (diaria, semanal, mensual,
+  anual; calculada desde la fecha original), audios e imágenes. Al llegar la hora: notificación
+  (Hecho / primera opción de posponer), ventana con el contenido y alarma que se repite hasta
+  2 minutos. Opciones de posponer configurables. Los atendidos pasan a «Completados».
+- **Imágenes**: pegar, archivo, arrastrar, captura de pantalla (portal), cámara (v4l2). La IA las ve
+  (ajuste «El modelo admite imágenes» por proveedor); se envían reducidas a 1568 px en JPEG.
+- Atajo **Super+Alt+S**: captura de pantalla y empieza a grabar.
+- Retención: los audios del historial se conservan 24 h con «solo notas» (para poder convertir
+  la conversación en nota) o N días con «siempre»; los de notas y recordatorios, siempre.

@@ -1,9 +1,8 @@
-//! Tools que la IA puede usar sobre notas y tareas.
+//! Tools que la IA puede usar sobre notas, tareas y recordatorios.
 //!
 //! Los argumentos de cada tool son structs con `JsonSchema`: el esquema que ve el
 //! modelo y la validación al recibir la llamada salen de la misma definición.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -15,43 +14,71 @@ use serde_json::{Value, json};
 use crate::app::Command;
 use crate::llm::{ToolCall, ToolExecutor, ToolOutput, ToolSpec};
 use crate::store::{
-    NewNote, NewTodo, NoteFilter, NoteUpdate, Priority, Store, Todo, TodoFilter, TodoStatus, TodoUpdate,
+    Attachment, NewNote, NewReminder, NewTodo, NoteFilter, NoteUpdate, Owner, Priority, Reminder, ReminderUpdate,
+    Repeat, Store, Todo, TodoFilter, TodoStatus, TodoUpdate,
 };
 use crate::i18n::{tr, trf};
 
 /// Se añade al prompt de sistema de cada conversación.
 pub const GUIDANCE: &str = "\
-Tienes tools para gestionar las notas del usuario (con cuadernos y etiquetas) y sus \
-listas de tareas. Úsalas cuando pida apuntar, recordar, consultar, cambiar o borrar \
-algo. Si la nota sale de un mensaje de voz, adjunta el audio. Convierte las fechas \
-relativas («mañana», «el viernes») a fechas absolutas a partir de la fecha actual. \
-Para editar o borrar, busca primero el elemento y usa su id; nunca inventes ids. \
-Los borrados piden confirmación al usuario automáticamente: no se la pidas tú antes. \
-Tras usar tools, resume en una frase lo que has hecho.";
+Tienes tools para gestionar las notas del usuario (con cuadernos, etiquetas, audios e \
+imágenes), sus listas de tareas y sus recordatorios (avisos a una hora concreta, que \
+pueden repetirse y llevar audio e imágenes). Úsalas cuando pida apuntar, recordar, \
+consultar, cambiar o borrar algo. Usa un recordatorio cuando quiera que le avises a una \
+hora; una tarea, cuando sea algo pendiente de hacer.\n\n\
+Los mensajes del usuario pueden llevar adjuntos (grabaciones de voz e imágenes); al \
+final de cada mensaje se indican sus ids. Al crear o editar una nota o un recordatorio \
+puedes adjuntar con `attach`: \"current\" (los del mensaje actual), \"conversation\" \
+(todos los de la conversación) o \"selected\" con `attachment_ids`. Si te pide convertir \
+la conversación en nota, adjunta los de los mensajes con contenido, no el del mensaje que \
+solo da esa orden; si pide unos concretos o todos, haz eso. Usa \
+list_conversation_attachments para ver las transcripciones si dudas.\n\n\
+Convierte las fechas relativas («mañana», «el viernes») a fechas absolutas a partir de \
+la fecha actual. Para editar o borrar, busca primero el elemento y usa su id; nunca \
+inventes ids. Los borrados piden confirmación al usuario automáticamente: no se la \
+pidas tú antes. Tras usar tools, resume en una frase lo que has hecho.";
 
 /// Datos del mensaje que está procesando el agente.
 #[derive(Debug, Default, Clone)]
 pub struct TurnContext {
     pub conversation_id: Option<i64>,
-    pub audio_path: Option<String>,
-    pub transcript: Option<String>,
+    /// Adjuntos del mensaje actual del usuario.
+    pub attachment_ids: Vec<i64>,
 }
 
 pub struct Toolbox {
     store: Store,
     commands: async_channel::Sender<Command>,
     context: TurnContext,
-    audio_used: AtomicBool,
 }
 
 impl Toolbox {
     pub fn new(store: Store, commands: async_channel::Sender<Command>, context: TurnContext) -> Self {
-        Self { store, commands, context, audio_used: AtomicBool::new(false) }
+        Self { store, commands, context }
     }
 
-    /// Si alguna nota se ha quedado con el audio del mensaje.
-    pub fn audio_used(&self) -> bool {
-        self.audio_used.load(Ordering::Relaxed)
+    /// Ids de los adjuntos que hay que copiar según `attach` y `attachment_ids`.
+    fn chosen_attachments(&self, attach: Option<&str>, ids: Option<Vec<i64>>) -> Result<Vec<i64>> {
+        Ok(match attach.unwrap_or(if ids.is_some() { "selected" } else { "none" }) {
+            "none" => Vec::new(),
+            "current" => self.context.attachment_ids.clone(),
+            "conversation" => match self.context.conversation_id {
+                Some(id) => self.store.conversation_attachments(id)?.into_iter().map(|a| a.attachment.id).collect(),
+                None => Vec::new(),
+            },
+            "selected" => ids.unwrap_or_default(),
+            other => bail!(trf("Valor de attach desconocido: {value} (usa none, current, conversation o selected)", &[("value", &other)])),
+        })
+    }
+
+    /// Copia los adjuntos elegidos y devuelve un sufijo para el resumen.
+    fn attach(&self, owner: Owner, attach: Option<&str>, ids: Option<Vec<i64>>) -> Result<String> {
+        let chosen = self.chosen_attachments(attach, ids)?;
+        if chosen.is_empty() {
+            return Ok(String::new());
+        }
+        let copied = self.store.copy_attachments(&chosen, owner)?;
+        Ok(trf(" ({count} adjuntos)", &[("count", &copied)]))
     }
 
     /// Pide confirmación en el popup. Si nadie responde en 5 minutos, se cancela.
@@ -84,21 +111,39 @@ impl Toolbox {
         match name {
             "create_note" => {
                 let a: CreateNote = args(input)?;
-                let attach = a.attach_audio.unwrap_or(false) && self.context.audio_path.is_some();
                 let id = store.create_note(NewNote {
                     title: a.title.clone(),
                     content: a.content,
                     notebook: a.notebook,
                     tags: a.tags.unwrap_or_default(),
-                    transcript: attach.then(|| self.context.transcript.clone()).flatten(),
-                    audio_path: attach.then(|| self.context.audio_path.clone()).flatten(),
                     conversation_id: self.context.conversation_id,
                 })?;
-                if attach {
-                    self.audio_used.store(true, Ordering::Relaxed);
-                }
-                let suffix = if attach { tr(" (con audio)") } else { String::new() };
-                Ok(ToolOutput::new(json!({ "id": id, "audio_attached": attach }), trf("Nota creada: «{title}»{audio}", &[("title", &a.title), ("audio", &suffix)])))
+                let suffix = self.attach(Owner::Note(id), a.attach.as_deref(), a.attachment_ids)?;
+                Ok(ToolOutput::new(
+                    json!({ "id": id, "attachments": attachments_json(&store.attachments(Owner::Note(id))?) }),
+                    trf("Nota creada: «{title}»{attachments}", &[("title", &a.title), ("attachments", &suffix)]),
+                ))
+            }
+            "list_conversation_attachments" => {
+                let Some(conversation) = self.context.conversation_id else {
+                    return Ok(ToolOutput::new(json!({ "attachments": [] }), tr("Adjuntos consultados")));
+                };
+                let items: Vec<Value> = store
+                    .conversation_attachments(conversation)?
+                    .into_iter()
+                    .map(|c| {
+                        json!({
+                            "id": c.attachment.id,
+                            "kind": c.attachment.kind,
+                            "transcript": c.attachment.transcript,
+                            "message_id": c.message_id,
+                            "message": c.message.chars().take(200).collect::<String>(),
+                            "in_current_message": self.context.attachment_ids.contains(&c.attachment.id),
+                            "time": local_time(c.attachment.created),
+                        })
+                    })
+                    .collect();
+                Ok(ToolOutput::new(json!({ "attachments": items }), tr("Adjuntos consultados")))
             }
             "get_note" => {
                 let a: Id = args(input)?;
@@ -110,8 +155,7 @@ impl Toolbox {
                         "content": note.content,
                         "notebook": note.notebook,
                         "tags": note.tags,
-                        "has_audio": note.has_audio,
-                        "transcript": note.transcript,
+                        "attachments": attachments_json(&note.attachments),
                         "created": local_time(note.created),
                         "modified": local_time(note.modified),
                     }),
@@ -148,8 +192,12 @@ impl Toolbox {
                     a.id,
                     NoteUpdate { title: a.title, content: a.content, append: a.append, notebook: a.notebook, tags: a.tags },
                 )?;
+                let suffix = self.attach(Owner::Note(a.id), a.attach.as_deref(), a.attachment_ids)?;
                 let note = store.get_note(a.id)?;
-                Ok(ToolOutput::new(json!({ "updated": true }), trf("Nota actualizada: «{title}»", &[("title", &note.title)])))
+                Ok(ToolOutput::new(
+                    json!({ "updated": true, "attachments": attachments_json(&note.attachments) }),
+                    trf("Nota actualizada: «{title}»{attachments}", &[("title", &note.title), ("attachments", &suffix)]),
+                ))
             }
             "delete_note" => {
                 let a: Id = args(input)?;
@@ -158,14 +206,7 @@ impl Toolbox {
                 self.delete_with_confirmation(
                     trf("¿Borrar la nota «{title}»?", &[("title", &note.title)]),
                     trf("Nota borrada: «{title}»", &[("title", &note.title)]),
-                    move || {
-                        if let Some(audio) = store.delete_note(a.id)?
-                            && !store.referenced_audio_paths()?.contains(&audio)
-                        {
-                            let _ = std::fs::remove_file(&audio);
-                        }
-                        Ok(())
-                    },
+                    move || store.delete_note(a.id),
                 )
                 .await
             }
@@ -296,7 +337,89 @@ impl Toolbox {
                 )
                 .await
             }
-            other => Err(anyhow!("La tool {other} no existe")),
+            "create_reminder" => {
+                let a: CreateReminder = args(input)?;
+                let id = store.create_reminder(NewReminder {
+                    title: a.title.clone(),
+                    body: a.text.unwrap_or_default(),
+                    due_at: parse_local_datetime(&a.at)?,
+                    repeat: a.repeat.as_deref().map(Repeat::parse).transpose()?.unwrap_or_default(),
+                    conversation_id: self.context.conversation_id,
+                })?;
+                let suffix = self.attach(Owner::Reminder(id), a.attach.as_deref(), a.attachment_ids)?;
+                let reminder = store.get_reminder(id)?;
+                Ok(ToolOutput::new(
+                    json!({ "reminder": reminder_json(&reminder) }),
+                    trf(
+                        "Recordatorio creado: «{title}», {date}{attachments}",
+                        &[("title", &reminder.title), ("date", &local_time(reminder.due_at)), ("attachments", &suffix)],
+                    ),
+                ))
+            }
+            "list_reminders" => {
+                let a: ListReminders = args(input)?;
+                let mut reminders = Vec::new();
+                match a.status.as_deref().unwrap_or("pending") {
+                    "pending" => reminders.extend(store.list_reminders(false)?),
+                    "done" => reminders.extend(store.list_reminders(true)?),
+                    "all" => {
+                        reminders.extend(store.list_reminders(false)?);
+                        reminders.extend(store.list_reminders(true)?);
+                    }
+                    other => bail!(trf("Estado desconocido: {value} (usa pending, done o all)", &[("value", &other)])),
+                }
+                let count = reminders.len();
+                let items: Vec<Value> = reminders.iter().map(reminder_json).collect();
+                Ok(ToolOutput::new(json!({ "reminders": items }), trf("Recordatorios consultados: {count}", &[("count", &count)])))
+            }
+            "get_reminder" => {
+                let a: Id = args(input)?;
+                let reminder = store.get_reminder(a.id)?;
+                Ok(ToolOutput::new(
+                    json!({ "reminder": reminder_json(&reminder) }),
+                    trf("Recordatorio leído: «{title}»", &[("title", &reminder.title)]),
+                ))
+            }
+            "update_reminder" => {
+                let a: UpdateReminder = args(input)?;
+                store.update_reminder(
+                    a.id,
+                    ReminderUpdate {
+                        title: a.title,
+                        body: a.text,
+                        due_at: a.at.as_deref().map(parse_local_datetime).transpose()?,
+                        repeat: a.repeat.as_deref().map(Repeat::parse).transpose()?,
+                    },
+                )?;
+                let suffix = self.attach(Owner::Reminder(a.id), a.attach.as_deref(), a.attachment_ids)?;
+                let reminder = store.get_reminder(a.id)?;
+                Ok(ToolOutput::new(
+                    json!({ "reminder": reminder_json(&reminder) }),
+                    trf("Recordatorio actualizado: «{title}»{attachments}", &[("title", &reminder.title), ("attachments", &suffix)]),
+                ))
+            }
+            "complete_reminder" => {
+                let a: Id = args(input)?;
+                let reminder = store.complete_reminder(a.id)?;
+                let summary = if reminder.done {
+                    trf("Recordatorio completado: «{title}»", &[("title", &reminder.title)])
+                } else {
+                    trf("Recordatorio hecho; el siguiente es el {date}", &[("date", &local_time(reminder.due_at))])
+                };
+                Ok(ToolOutput::new(json!({ "reminder": reminder_json(&reminder) }), summary))
+            }
+            "delete_reminder" => {
+                let a: Id = args(input)?;
+                let reminder = store.get_reminder(a.id)?;
+                let store = store.clone();
+                self.delete_with_confirmation(
+                    trf("¿Borrar el recordatorio «{title}»?", &[("title", &reminder.title)]),
+                    trf("Recordatorio borrado: «{title}»", &[("title", &reminder.title)]),
+                    move || store.delete_reminder(a.id),
+                )
+                .await
+            }
+            other => Err(anyhow!(trf("La tool {name} no existe", &[("name", &other)]))),
         }
     }
 }
@@ -315,6 +438,34 @@ fn local_time(unix: i64) -> String {
     chrono::DateTime::from_timestamp(unix, 0)
         .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_default()
+}
+
+fn attachments_json(attachments: &[Attachment]) -> Vec<Value> {
+    attachments
+        .iter()
+        .map(|a| json!({ "id": a.id, "kind": a.kind, "transcript": a.transcript }))
+        .collect()
+}
+
+fn reminder_json(reminder: &Reminder) -> Value {
+    json!({
+        "id": reminder.id,
+        "title": reminder.title,
+        "text": reminder.body,
+        "at": local_time(reminder.due_at),
+        "repeat": reminder.repeat,
+        "done": reminder.done,
+        "attachments": attachments_json(&reminder.attachments),
+    })
+}
+
+/// 'YYYY-MM-DD HH:MM' (o solo la fecha, a las 9:00) en hora local → unix.
+pub(crate) fn parse_local_datetime(text: &str) -> Result<i64> {
+    let text = text.trim();
+    if text.len() == 10 {
+        return parse_reminder(&format!("{text} 09:00"));
+    }
+    parse_reminder(text)
 }
 
 /// 'YYYY-MM-DD HH:MM' en hora local → unix.
@@ -376,8 +527,10 @@ struct CreateNote {
     notebook: Option<String>,
     /// Etiquetas, sin '#'.
     tags: Option<Vec<String>>,
-    /// Adjunta el audio y la transcripción del mensaje de voz actual.
-    attach_audio: Option<bool>,
+    /// Qué adjuntos (audios e imágenes) copiar: none (por defecto), current (los del mensaje actual), conversation (todos los de la conversación) o selected (los de attachment_ids).
+    attach: Option<String>,
+    /// Ids de adjuntos concretos (con attach = selected).
+    attachment_ids: Option<Vec<i64>>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -406,6 +559,50 @@ struct UpdateNote {
     notebook: Option<String>,
     /// Lista completa de etiquetas (sustituye a las actuales).
     tags: Option<Vec<String>>,
+    /// Adjuntos que añadir: current, conversation o selected (con attachment_ids).
+    attach: Option<String>,
+    /// Ids de adjuntos concretos (con attach = selected).
+    attachment_ids: Option<Vec<i64>>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct CreateReminder {
+    /// Título corto: de qué hay que avisar.
+    title: String,
+    /// Detalles en Markdown.
+    text: Option<String>,
+    /// Cuándo avisar: 'YYYY-MM-DD HH:MM' (hora local).
+    at: String,
+    /// none (por defecto), daily, weekly, monthly o yearly.
+    repeat: Option<String>,
+    /// Qué adjuntos copiar: none, current, conversation o selected (con attachment_ids).
+    attach: Option<String>,
+    /// Ids de adjuntos concretos (con attach = selected).
+    attachment_ids: Option<Vec<i64>>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct UpdateReminder {
+    /// Id del recordatorio.
+    id: i64,
+    /// Título nuevo.
+    title: Option<String>,
+    /// Texto nuevo completo.
+    text: Option<String>,
+    /// Nueva fecha y hora 'YYYY-MM-DD HH:MM'; lo vuelve a dejar pendiente.
+    at: Option<String>,
+    /// none, daily, weekly, monthly o yearly.
+    repeat: Option<String>,
+    /// Adjuntos que añadir: current, conversation o selected (con attachment_ids).
+    attach: Option<String>,
+    /// Ids de adjuntos concretos (con attach = selected).
+    attachment_ids: Option<Vec<i64>>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ListReminders {
+    /// pending (por defecto), done o all.
+    status: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -516,6 +713,16 @@ pub fn specs() -> Vec<ToolSpec> {
         spec::<UpdateTodo>("update_todo", "Modifica una tarea: texto, fecha, prioridad, aviso o lista."),
         spec::<CompleteTodo>("complete_todo", "Marca una tarea como hecha (o pendiente con done=false)."),
         spec::<Id>("delete_todo", "Borra una tarea (pide confirmación)."),
+        spec::<NoArgs>(
+            "list_conversation_attachments",
+            "Lista los audios e imágenes de los mensajes de esta conversación, con sus transcripciones.",
+        ),
+        spec::<CreateReminder>("create_reminder", "Crea un recordatorio: un aviso a una hora concreta, que puede repetirse."),
+        spec::<ListReminders>("list_reminders", "Lista recordatorios. Por defecto, los pendientes ordenados por fecha."),
+        spec::<Id>("get_reminder", "Devuelve un recordatorio completo."),
+        spec::<UpdateReminder>("update_reminder", "Modifica un recordatorio: título, texto, fecha, repetición o adjuntos."),
+        spec::<Id>("complete_reminder", "Marca un recordatorio como hecho (si se repite, pasa a la siguiente fecha)."),
+        spec::<Id>("delete_reminder", "Borra un recordatorio (pide confirmación)."),
     ]
 }
 
@@ -538,18 +745,37 @@ mod tests {
 
     #[tokio::test]
     async fn create_and_delete_with_confirmation() -> Result<()> {
+        use crate::store::{AttachmentKind, MessageKind, MessageRecord, NewAttachment};
         let store = Store::in_memory()?;
+        let conversation = store.create_conversation("c", "anthropic", "m", "s")?;
+        let mut ids = Vec::new();
+        for text in ["primera idea", "pásalo a nota"] {
+            let message = store.add_message(conversation, &MessageRecord::new(MessageKind::User, text))?;
+            let audio = NewAttachment {
+                kind: AttachmentKind::Audio,
+                path: format!("/tmp/{text}.ogg"),
+                mime: "audio/ogg".into(),
+                transcript: Some(text.into()),
+            };
+            ids.push(store.add_attachment(Owner::Message(message), &audio)?);
+        }
         let (commands, requests) = async_channel::unbounded();
-        let toolbox = Toolbox::new(
-            store.clone(),
-            commands,
-            TurnContext { audio_path: Some("/tmp/x.ogg".into()), transcript: Some("hola".into()), ..Default::default() },
-        );
+        let context = TurnContext { conversation_id: Some(conversation), attachment_ids: vec![ids[1]] };
+        let toolbox = Toolbox::new(store.clone(), commands, context);
+
+        // Solo el audio con contenido, no el de la orden.
         let created = toolbox
-            .run("create_note", json!({ "title": "Idea", "content": "algo", "attach_audio": true }))
+            .run("create_note", json!({ "title": "Idea", "content": "algo", "attach": "selected", "attachment_ids": [ids[0]] }))
             .await?;
-        assert!(toolbox.audio_used());
         let id = created.content["id"].as_i64().unwrap();
+        let note = store.get_note(id)?;
+        assert_eq!(note.attachments.len(), 1);
+        assert_eq!(note.attachments[0].transcript.as_deref(), Some("primera idea"));
+        // La búsqueda encuentra la transcripción.
+        assert_eq!(store.search_notes(&NoteFilter { query: Some("primera".into()), ..Default::default() })?.len(), 1);
+        // Todos los de la conversación.
+        let all = toolbox.run("create_note", json!({ "title": "Todo", "content": "x", "attach": "conversation" })).await?;
+        assert_eq!(store.get_note(all.content["id"].as_i64().unwrap())?.attachments.len(), 2);
 
         // Responde «no» a la confirmación y luego «sí».
         for (answer, deleted) in [(false, false), (true, true)] {
@@ -566,6 +792,29 @@ mod tests {
             assert_eq!(result.content["deleted"], deleted);
         }
         assert!(store.get_note(id).is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn reminders_lifecycle() -> Result<()> {
+        let store = Store::in_memory()?;
+        let (commands, _requests) = async_channel::unbounded();
+        let toolbox = Toolbox::new(store.clone(), commands, TurnContext::default());
+        let created = toolbox
+            .run("create_reminder", json!({ "title": "Pastilla", "at": "2026-01-01 08:00", "repeat": "daily" }))
+            .await?;
+        let id = created.content["reminder"]["id"].as_i64().unwrap();
+        let now = chrono::Utc::now().timestamp();
+        assert_eq!(store.reminders_due(now)?.len(), 1);
+        // Se repite: al completarlo pasa a una fecha futura y sigue pendiente.
+        let done = toolbox.run("complete_reminder", json!({ "id": id })).await?;
+        assert_eq!(done.content["reminder"]["done"], false);
+        assert!(store.get_reminder(id)?.due_at > now);
+        // Sin repetición pasa a completados.
+        toolbox.run("update_reminder", json!({ "id": id, "repeat": "none" })).await?;
+        toolbox.run("complete_reminder", json!({ "id": id })).await?;
+        assert_eq!(store.list_reminders(true)?.len(), 1);
+        assert!(toolbox.run("create_reminder", json!({ "title": "x", "at": "mañana" })).await.is_err());
         Ok(())
     }
 }

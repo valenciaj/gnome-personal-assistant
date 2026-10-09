@@ -117,6 +117,8 @@ pub struct ProviderSettings {
     pub base_url: String,
     /// Si está vacío se usa la variable de entorno del proveedor.
     pub api_key: String,
+    /// El modelo acepta imágenes; si no, solo se le dice que hay imágenes adjuntas.
+    pub vision: bool,
 }
 
 impl Default for ProviderSettings {
@@ -126,6 +128,7 @@ impl Default for ProviderSettings {
             reasoning: "default".into(),
             base_url: String::new(),
             api_key: String::new(),
+            vision: false,
         }
     }
 }
@@ -148,12 +151,14 @@ impl Default for LlmConfig {
                 model: "claude-opus-5-5".into(),
                 reasoning: "medium".into(),
                 base_url: "https://api.anthropic.com".into(),
+                vision: true,
                 ..Default::default()
             },
             openai: ProviderSettings {
                 model: "gpt-5".into(),
                 reasoning: "low".into(),
                 base_url: "https://api.openai.com/v1".into(),
+                vision: true,
                 ..Default::default()
             },
             ollama: ProviderSettings {
@@ -303,13 +308,22 @@ impl Default for AudioConfig {
 #[serde(default)]
 pub struct RemindersConfig {
     pub enabled: bool,
-    /// Hora ('HH:MM') del aviso de las tareas que solo tienen día.
+    /// Hora ('HH:MM') del aviso de las tareas que solo tienen día (y de «mañana» al posponer).
     pub default_time: String,
+    /// Opciones de posponer: "10m", "2h", "1d" o "tomorrow". La primera va en la notificación.
+    pub snooze: Vec<String>,
+    /// Repetir la alarma hasta que se atienda el recordatorio (como mucho 2 minutos).
+    pub repeat_alarm: bool,
 }
 
 impl Default for RemindersConfig {
     fn default() -> Self {
-        Self { enabled: true, default_time: "09:00".into() }
+        Self {
+            enabled: true,
+            default_time: "09:00".into(),
+            snooze: vec!["10m".into(), "1h".into(), "tomorrow".into()],
+            repeat_alarm: true,
+        }
     }
 }
 
@@ -364,6 +378,10 @@ pub fn data_dir() -> PathBuf {
 
 pub fn audio_dir() -> PathBuf {
     data_dir().join("audio")
+}
+
+pub fn images_dir() -> PathBuf {
+    data_dir().join("images")
 }
 
 impl Config {

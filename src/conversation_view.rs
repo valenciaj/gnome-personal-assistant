@@ -6,7 +6,7 @@ use gtk::glib;
 
 use crate::llm::DisplayItem;
 use crate::markdown;
-use crate::store::{MessageKind, MessageRecord};
+use crate::store::{Attachment, AttachmentKind, MessageKind, MessageRecord};
 use crate::i18n::tr;
 
 pub const CSS: &str = "
@@ -24,6 +24,10 @@ pub const CSS: &str = "
 }
 .confirmation { padding: 12px; }
 .note-body { padding: 0 2px; }
+.thumbnail { border-radius: 8px; }
+.thumbnail-button { padding: 0; }
+.attachment-audio { padding: 6px 10px; }
+.message-image { border-radius: 8px; }
 ";
 
 #[derive(Clone)]
@@ -61,14 +65,28 @@ impl ConversationView {
         }
     }
 
-    pub fn add_user(&self, text: &str, audio: Option<&str>) {
+    pub fn add_user(&self, text: &str, attachments: &[Attachment]) {
+        let images: Vec<&Attachment> = attachments.iter().filter(|a| a.kind == AttachmentKind::Image).collect();
+        if !images.is_empty() {
+            let strip = gtk::Box::builder().spacing(6).halign(gtk::Align::End).build();
+            for image in images {
+                let picture = crate::attachment_view::thumbnail_picture(&image.path, 96, 72);
+                let button = gtk::Button::builder().child(&picture).css_classes(["flat", "thumbnail-button"]).build();
+                let path = image.path.clone();
+                button.connect_clicked(move |b| crate::attachment_view::show_image(b, &path));
+                strip.append(&button);
+            }
+            self.append(&strip);
+        }
         let label = wrapped_label();
         label.set_text(text);
         label.add_css_class("user-bubble");
         let row = gtk::Box::builder().spacing(4).halign(gtk::Align::End).build();
-        if let Some(button) = audio.and_then(play_button) {
-            button.set_valign(gtk::Align::Center);
-            row.append(&button);
+        for audio in attachments.iter().filter(|a| a.kind == AttachmentKind::Audio) {
+            if let Some(button) = play_button(&audio.path) {
+                button.set_valign(gtk::Align::Center);
+                row.append(&button);
+            }
         }
         row.append(&label);
         self.append(&row);
@@ -99,7 +117,7 @@ impl ConversationView {
     /// Reconstruye un mensaje guardado en el historial.
     pub fn add_record(&self, record: &MessageRecord) {
         match record.kind {
-            MessageKind::User => self.add_user(&record.content, record.audio_path.as_deref()),
+            MessageKind::User => self.add_user(&record.content, &record.attachments),
             MessageKind::Reasoning => self.add_items(&[DisplayItem::Reasoning(record.content.clone())]),
             MessageKind::Text => self.add_items(&[DisplayItem::Text(record.content.clone())]),
             MessageKind::Tool => {

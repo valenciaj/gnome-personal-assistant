@@ -32,6 +32,7 @@ struct Prefs {
     models_list: gtk::ListBox,
     models_status: gtk::Label,
     reasoning: adw::ComboRow,
+    vision: adw::SwitchRow,
 }
 
 pub fn show(parent: Option<&gtk::Widget>, commands: async_channel::Sender<Command>) -> adw::PreferencesDialog {
@@ -57,6 +58,10 @@ pub fn show(parent: Option<&gtk::Widget>, commands: async_channel::Sender<Comman
         models_list,
         models_status,
         reasoning: adw::ComboRow::builder().title(tr("Razonamiento")).build(),
+        vision: adw::SwitchRow::builder()
+            .title(tr("El modelo admite imágenes"))
+            .subtitle(tr("Si no, solo se le dice que hay imágenes adjuntas"))
+            .build(),
     });
 
     dialog.add(&general_page(&prefs, &commands));
@@ -100,6 +105,7 @@ impl Prefs {
         self.key.set_text(&secrets::get(&provider.secret_name()).unwrap_or_default());
         self.key.set_visible(provider != LlmProvider::Ollama);
         self.model.set_text(&settings.model);
+        self.vision.set_active(settings.vision);
         let levels = provider.reasoning_levels();
         let labels: Vec<String> = levels.iter().map(|(_, label)| tr(label)).collect();
         self.reasoning.set_model(Some(&gtk::StringList::new(&labels.iter().map(String::as_str).collect::<Vec<_>>())));
@@ -223,8 +229,8 @@ fn general_page(prefs: &Rc<Prefs>, commands: &async_channel::Sender<Command>) ->
 
     let reminders_config = prefs.config.borrow().reminders.clone();
     let reminders = adw::PreferencesGroup::builder()
-        .title(tr("Recordatorios de tareas"))
-        .description(tr("Avisan con una notificación cuando llega la fecha o la hora de aviso de una tarea."))
+        .title(tr("Recordatorios y avisos de tareas"))
+        .description(tr("Avisan cuando llega la hora de un recordatorio o la fecha de una tarea."))
         .build();
     let enabled = adw::SwitchRow::builder().title(tr("Avisar de las tareas")).active(reminders_config.enabled).build();
     let default_time = adw::EntryRow::builder()
@@ -241,14 +247,38 @@ fn general_page(prefs: &Rc<Prefs>, commands: &async_channel::Sender<Command>) ->
         prefs,
         move |row| prefs.config.borrow_mut().reminders.default_time = row.text().trim().to_owned()
     ));
+    let snooze = adw::EntryRow::builder()
+        .title(tr("Opciones de posponer (10m, 1h, 1d, tomorrow…)"))
+        .text(reminders_config.snooze.join(", "))
+        .build();
+    snooze.connect_changed(glib::clone!(
+        #[weak]
+        prefs,
+        move |row| {
+            prefs.config.borrow_mut().reminders.snooze =
+                row.text().split(',').map(|o| o.trim().to_owned()).filter(|o| !o.is_empty()).collect();
+        }
+    ));
+    let repeat_alarm = adw::SwitchRow::builder()
+        .title(tr("Repetir la alarma hasta que lo atienda"))
+        .subtitle(tr("Durante dos minutos como máximo"))
+        .active(reminders_config.repeat_alarm)
+        .build();
+    repeat_alarm.connect_active_notify(glib::clone!(
+        #[weak]
+        prefs,
+        move |row| prefs.config.borrow_mut().reminders.repeat_alarm = row.is_active()
+    ));
     reminders.add(&enabled);
     reminders.add(&default_time);
+    reminders.add(&snooze);
+    reminders.add(&repeat_alarm);
     page.add(&reminders);
 
     let shortcuts = adw::PreferencesGroup::builder().title(tr("Atajos de teclado")).build();
     let row = adw::ActionRow::builder()
         .title(tr("Atajos globales"))
-        .subtitle(tr("Por defecto Super+Alt+Espacio graba y Super+Alt+R reabre la última conversación"))
+        .subtitle(tr("Por defecto: Super+Alt+Espacio graba, Super+Alt+S captura la pantalla y graba, Super+Alt+R reabre la última conversación"))
         .build();
     let change = gtk::Button::builder().label(tr("Cambiar…")).valign(gtk::Align::Center).build();
     let commands = commands.clone();
@@ -298,6 +328,7 @@ fn ai_page(prefs: &Rc<Prefs>) -> adw::PreferencesPage {
         prefs.provider.upcast_ref::<gtk::Widget>(),
         prefs.model.upcast_ref(),
         prefs.reasoning.upcast_ref(),
+        prefs.vision.upcast_ref(),
         prefs.key.upcast_ref(),
         prefs.url.upcast_ref(),
         test.upcast_ref(),
@@ -348,6 +379,16 @@ fn ai_page(prefs: &Rc<Prefs>) -> adw::PreferencesPage {
             let provider = prefs.provider();
             if let Some((value, _)) = provider.reasoning_levels().get(row.selected() as usize) {
                 prefs.config.borrow_mut().llm.settings_mut(provider).reasoning = (*value).to_owned();
+            }
+        }
+    ));
+    prefs.vision.connect_active_notify(glib::clone!(
+        #[weak]
+        prefs,
+        move |row| {
+            if !prefs.loading.get() {
+                let provider = prefs.provider();
+                prefs.config.borrow_mut().llm.settings_mut(provider).vision = row.is_active();
             }
         }
     ));

@@ -138,6 +138,7 @@ pub enum Sound {
     Start,
     Stop,
     Error,
+    Alarm,
 }
 
 /// Reproduce un sonido corto del tema de sonidos del sistema.
@@ -150,6 +151,7 @@ pub fn play(sound: Sound) {
         Sound::Start => "device-added",
         Sound::Stop => "device-removed",
         Sound::Error => "dialog-warning",
+        Sound::Alarm => "alarm-clock-elapsed",
     };
     let Some(path) = ["/usr/share/sounds/Yaru/stereo", "/usr/share/sounds/freedesktop/stereo"]
         .iter()

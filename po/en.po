@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gnome-personal-assistant\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-09 11:59+0200\n"
+"POT-Creation-Date: 2026-10-09 13:20+0200\n"
 "PO-Revision-Date: 2026-10-09 12:00+0200\n"
 "Last-Translator: Javier Valencia <javier.valencia@voiper.es>\n"
 "Language-Team: English\n"
@@ -13,11 +13,11 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/app.rs:230
+#: src/app.rs:245
 msgid "Atajos de teclado no disponibles"
 msgstr "Keyboard shortcuts unavailable"
 
-#: src/app.rs:232
+#: src/app.rs:247
 msgid ""
 "{error}. Puedes usar «gnome-personal-assistant toggle» en un atajo "
 "personalizado de GNOME."
@@ -25,41 +25,118 @@ msgstr ""
 "{error}. You can use “gnome-personal-assistant toggle” in a custom GNOME "
 "shortcut."
 
-#: src/app.rs:481
+#: src/app.rs:319
+msgid "Siguiente aviso de «{title}»: {date}"
+msgstr "Next reminder for “{title}”: {date}"
+
+#: src/app.rs:566 src/record_dialog.rs:65
 msgid "Transcribiendo…"
 msgstr "Transcribing…"
 
-#: src/app.rs:490
+#: src/app.rs:575
 msgid "No se ha detectado voz en la grabación"
 msgstr "No speech was detected in the recording"
 
-#: src/app.rs:528 src/popup.rs:194 src/tray.rs:50
+#: src/app.rs:608 src/popup.rs:275 src/tray.rs:50
 msgid "Pensando…"
 msgstr "Thinking…"
 
-#: src/app.rs:613 src/popup.rs:26
+#: src/app.rs:711 src/app.rs:975 src/popup.rs:30
 msgid "Asistente"
 msgstr "Assistant"
 
-#: src/app.rs:637
+#: src/app.rs:735
 msgid "Proveedor desconocido: {provider}"
 msgstr "Unknown provider: {provider}"
 
-#: src/app.rs:764
+#: src/app.rs:892 src/reminder_window.rs:89
 msgid "Recordatorio"
 msgstr "Reminder"
 
-#: src/app.rs:772
+#: src/app.rs:900 src/app.rs:959 src/explorer/reminders.rs:72
+#: src/explorer/reminders.rs:333 src/reminder_window.rs:69
 msgid "Hecho"
 msgstr "Done"
 
-#: src/app.rs:773
+#: src/app.rs:901
 msgid "Posponer 10 min"
 msgstr "Snooze 10 min"
 
-#: src/app.rs:812
+#: src/app.rs:965
+msgid "Posponer {time}"
+msgstr "Snooze {time}"
+
+#: src/app.rs:998
 msgid "Error del asistente"
 msgstr "Assistant error"
+
+#: src/attachments.rs:61
+msgid "No es una imagen admitida: {path}"
+msgstr "Not a supported image: {path}"
+
+#: src/attachments.rs:63 src/attachments.rs:128
+msgid "No se pudo abrir la imagen {path}"
+msgstr "Could not open the image {path}"
+
+#: src/attachments.rs:72
+msgid "No es un audio admitido: {path}"
+msgstr "Not a supported audio file: {path}"
+
+#: src/attachments.rs:82
+msgid "No se pudo copiar {path}"
+msgstr "Could not copy {path}"
+
+#: src/attachments.rs:105
+msgid "No hay ninguna imagen en el portapapeles"
+msgstr "There is no image in the clipboard"
+
+#: src/attachment_view.rs:38
+msgid "La grabación ya no existe"
+msgstr "The recording no longer exists"
+
+#: src/attachment_view.rs:107
+msgid "Quitar"
+msgstr "Remove"
+
+#: src/attachment_view.rs:118
+msgid "Ver la imagen"
+msgstr "View the image"
+
+#: src/attachment_view.rs:160
+msgid "Adjuntar"
+msgstr "Attach"
+
+#: src/attachment_view.rs:166
+msgid "Imagen desde archivo…"
+msgstr "Image from file…"
+
+#: src/attachment_view.rs:167
+msgid "Pegar imagen"
+msgstr "Paste image"
+
+#: src/attachment_view.rs:168
+msgid "Captura de pantalla"
+msgstr "Screenshot"
+
+#: src/attachment_view.rs:169
+msgid "Foto con la cámara…"
+msgstr "Photo with the camera…"
+
+#: src/attachment_view.rs:172
+msgid "Grabar audio…"
+msgstr "Record audio…"
+
+#: src/attachment_view.rs:173
+msgid "Importar audio…"
+msgstr "Import audio…"
+
+#: src/attachment_view.rs:212
+msgid "Elegir imagen"
+msgstr "Choose an image"
+
+#: src/attachment_view.rs:216
+msgid "Elegir audio"
+msgstr "Choose an audio file"
 
 #: src/audio.rs:43
 msgid "No se pudo crear el pipeline de audio"
@@ -80,6 +157,18 @@ msgstr "The audio pipeline closed unexpectedly"
 #: src/audio.rs:105
 msgid "La grabación no terminó a tiempo"
 msgstr "The recording did not finish in time"
+
+#: src/camera.rs:21 src/camera.rs:48
+msgid "No se pudo abrir la cámara"
+msgstr "Could not open the camera"
+
+#: src/camera.rs:51
+msgid "Hacer foto"
+msgstr "Take photo"
+
+#: src/camera.rs:65
+msgid "Cámara"
+msgstr "Camera"
 
 #: src/config.rs:25 src/config.rs:33 src/config.rs:42
 msgid "Por defecto del modelo"
@@ -133,15 +222,15 @@ msgstr "Medium (gpt-oss)"
 msgid "Alto (gpt-oss)"
 msgstr "High (gpt-oss)"
 
-#: src/config.rs:86 src/preferences.rs:405
+#: src/config.rs:86 src/preferences.rs:446
 msgid "Compatible con OpenAI"
 msgstr "OpenAI-compatible"
 
-#: src/conversation_view.rs:85 src/preferences.rs:59
+#: src/conversation_view.rs:103 src/preferences.rs:60
 msgid "Razonamiento"
 msgstr "Reasoning"
 
-#: src/conversation_view.rs:164
+#: src/conversation_view.rs:182
 msgid "Escuchar la grabación"
 msgstr "Play the recording"
 
@@ -181,156 +270,235 @@ msgstr ""
 "Its messages and recordings will be deleted. Notes and tasks created in it "
 "are kept."
 
-#: src/explorer/conversations.rs:181 src/explorer/notes.rs:91
-#: src/explorer/notes.rs:506 src/explorer/notes.rs:556
-#: src/explorer/todos.rs:261 src/explorer/todos.rs:364 src/popup.rs:169
+#: src/explorer/conversations.rs:181 src/explorer/notes.rs:95
+#: src/explorer/notes.rs:531 src/explorer/notes.rs:621
+#: src/explorer/reminders.rs:74 src/explorer/reminders.rs:424
+#: src/explorer/todos.rs:261 src/explorer/todos.rs:364 src/popup.rs:250
 msgid "Borrar"
 msgstr "Delete"
 
-#: src/explorer/conversations.rs:197
+#: src/explorer/conversations.rs:187
 msgid "Conversación borrada"
 msgstr "Conversation deleted"
 
-#: src/explorer/mod.rs:49 src/explorer/mod.rs:62 src/explorer/notes.rs:123
-#: src/explorer/todos.rs:301 src/popup.rs:168
+#: src/explorer/mod.rs:52 src/explorer/mod.rs:65 src/explorer/notes.rs:127
+#: src/explorer/reminders.rs:108 src/explorer/todos.rs:301 src/popup.rs:249
 msgid "Cancelar"
 msgstr "Cancel"
 
-#: src/explorer/mod.rs:89 src/tray.rs:33 src/tray.rs:54
+#: src/explorer/mod.rs:93 src/tray.rs:33 src/tray.rs:54
 msgid "Asistente personal"
 msgstr "Personal Assistant"
 
-#: src/explorer/mod.rs:104
+#: src/explorer/mod.rs:111
 msgid "Notas"
 msgstr "Notes"
 
-#: src/explorer/mod.rs:105
+#: src/explorer/mod.rs:112
+msgid "Recordatorios"
+msgstr "Reminders"
+
+#: src/explorer/mod.rs:113
 msgid "Tareas"
 msgstr "Tasks"
 
-#: src/explorer/mod.rs:109
+#: src/explorer/mod.rs:117
 msgid "Conversaciones"
 msgstr "Conversations"
 
-#: src/explorer/mod.rs:115 src/preferences.rs:42
+#: src/explorer/mod.rs:123 src/preferences.rs:43
 msgid "Preferencias"
 msgstr "Preferences"
 
-#: src/explorer/notes.rs:15
+#: src/explorer/notes.rs:16
 msgid "Todos los cuadernos"
 msgstr "All notebooks"
 
-#: src/explorer/notes.rs:16
+#: src/explorer/notes.rs:17
 msgid "Todas las etiquetas"
 msgstr "All tags"
 
-#: src/explorer/notes.rs:56
+#: src/explorer/notes.rs:60
 msgid "Buscar notas"
 msgstr "Search notes"
 
-#: src/explorer/notes.rs:57 src/explorer/notes.rs:451
+#: src/explorer/notes.rs:61 src/explorer/notes.rs:468
 msgid "Nueva nota"
 msgstr "New note"
 
-#: src/explorer/notes.rs:59
+#: src/explorer/notes.rs:63
 msgid "Nuevo cuaderno…"
 msgstr "New notebook…"
 
-#: src/explorer/notes.rs:60
+#: src/explorer/notes.rs:64
 msgid "Renombrar cuaderno…"
 msgstr "Rename notebook…"
 
-#: src/explorer/notes.rs:61
+#: src/explorer/notes.rs:65
 msgid "Borrar cuaderno…"
 msgstr "Delete notebook…"
 
-#: src/explorer/notes.rs:64
+#: src/explorer/notes.rs:68
 msgid "Cuadernos"
 msgstr "Notebooks"
 
-#: src/explorer/notes.rs:90 src/explorer/todos.rs:255
+#: src/explorer/notes.rs:94 src/explorer/reminders.rs:73
+#: src/explorer/todos.rs:255
 msgid "Editar"
 msgstr "Edit"
 
-#: src/explorer/notes.rs:124 src/explorer/todos.rs:302
+#: src/explorer/notes.rs:128 src/explorer/reminders.rs:109
+#: src/explorer/todos.rs:302
 msgid "Guardar"
 msgstr "Save"
 
-#: src/explorer/notes.rs:130
+#: src/explorer/notes.rs:134 src/explorer/reminders.rs:115
 msgid "Título"
 msgstr "Title"
 
-#: src/explorer/notes.rs:131
+#: src/explorer/notes.rs:135
 msgid "Cuaderno (opcional)"
 msgstr "Notebook (optional)"
 
-#: src/explorer/notes.rs:132
+#: src/explorer/notes.rs:136
 msgid "Etiquetas, separadas por comas"
 msgstr "Tags, separated by commas"
 
-#: src/explorer/notes.rs:168
+#: src/explorer/notes.rs:164 src/explorer/reminders.rs:133
+msgid "Adjuntos"
+msgstr "Attachments"
+
+#: src/explorer/notes.rs:177
 msgid "Sin nota"
 msgstr "No note"
 
-#: src/explorer/notes.rs:168
+#: src/explorer/notes.rs:177
 msgid "Elige una nota o crea una nueva."
 msgstr "Pick a note or create a new one."
 
-#: src/explorer/notes.rs:281
+#: src/explorer/notes.rs:304
 msgid "Nuevo cuaderno"
 msgstr "New notebook"
 
-#: src/explorer/notes.rs:281 src/explorer/todos.rs:124
+#: src/explorer/notes.rs:304 src/explorer/todos.rs:124
 msgid "Crear"
 msgstr "Create"
 
-#: src/explorer/notes.rs:399
+#: src/explorer/notes.rs:424
 msgid "Creada {date}"
 msgstr "Created {date}"
 
-#: src/explorer/notes.rs:401
+#: src/explorer/notes.rs:426
 msgid "modificada {date}"
 msgstr "modified {date}"
 
-#: src/explorer/notes.rs:419
-msgid "Transcripción original"
-msgstr "Original transcript"
-
-#: src/explorer/notes.rs:443
+#: src/explorer/notes.rs:460
 msgid "Editar nota"
 msgstr "Edit note"
 
-#: src/explorer/notes.rs:495
+#: src/explorer/notes.rs:520
 msgid "Nota guardada"
 msgstr "Note saved"
 
-#: src/explorer/notes.rs:504
+#: src/explorer/notes.rs:529 src/explorer/reminders.rs:422
 msgid "¿Borrar «{title}»?"
 msgstr "Delete “{title}”?"
 
-#: src/explorer/notes.rs:505
+#: src/explorer/notes.rs:530
 msgid "La nota y su grabación se borrarán definitivamente."
 msgstr "The note and its recording will be deleted permanently."
 
-#: src/explorer/notes.rs:518
+#: src/explorer/notes.rs:536
 msgid "Nota borrada"
 msgstr "Note deleted"
 
-#: src/explorer/notes.rs:542
+#: src/explorer/notes.rs:607
 msgid "Renombrar cuaderno"
 msgstr "Rename notebook"
 
-#: src/explorer/notes.rs:542 src/explorer/todos.rs:350
+#: src/explorer/notes.rs:607 src/explorer/todos.rs:350
 msgid "Renombrar"
 msgstr "Rename"
 
-#: src/explorer/notes.rs:554
+#: src/explorer/notes.rs:619
 msgid "¿Borrar el cuaderno «{name}»?"
 msgstr "Delete the notebook “{name}”?"
 
-#: src/explorer/notes.rs:555
+#: src/explorer/notes.rs:620
 msgid "Sus notas no se borran: se quedan sin cuaderno."
 msgstr "Its notes are not deleted; they are left without a notebook."
+
+#: src/explorer/reminders.rs:16
+msgid "Sin repetición"
+msgstr "Does not repeat"
+
+#: src/explorer/reminders.rs:16
+msgid "Cada día"
+msgstr "Every day"
+
+#: src/explorer/reminders.rs:16
+msgid "Cada semana"
+msgstr "Every week"
+
+#: src/explorer/reminders.rs:16
+msgid "Cada mes"
+msgstr "Every month"
+
+#: src/explorer/reminders.rs:16
+msgid "Cada año"
+msgstr "Every year"
+
+#: src/explorer/reminders.rs:58
+msgid "Pendientes"
+msgstr "Pending"
+
+#: src/explorer/reminders.rs:59
+msgid "Completados"
+msgstr "Completed"
+
+#: src/explorer/reminders.rs:63 src/explorer/reminders.rs:376
+msgid "Nuevo recordatorio"
+msgstr "New reminder"
+
+#: src/explorer/reminders.rs:116
+msgid "Fecha y hora (AAAA-MM-DD HH:MM)"
+msgstr "Date and time (YYYY-MM-DD HH:MM)"
+
+#: src/explorer/reminders.rs:159
+msgid "Sin recordatorio"
+msgstr "No reminder"
+
+#: src/explorer/reminders.rs:159
+msgid "Elige un recordatorio o crea uno nuevo."
+msgstr "Pick a reminder or create a new one."
+
+#: src/explorer/reminders.rs:283
+msgid "⚠ {date}"
+msgstr "⚠ {date}"
+
+#: src/explorer/reminders.rs:330
+msgid "completado {date}"
+msgstr "completed {date}"
+
+#: src/explorer/reminders.rs:333
+msgid "Reabrir"
+msgstr "Reopen"
+
+#: src/explorer/reminders.rs:368
+msgid "Editar recordatorio"
+msgstr "Edit reminder"
+
+#: src/explorer/reminders.rs:413
+msgid "Recordatorio guardado"
+msgstr "Reminder saved"
+
+#: src/explorer/reminders.rs:423
+msgid "El recordatorio y sus adjuntos se borrarán definitivamente."
+msgstr "The reminder and its attachments will be deleted permanently."
+
+#: src/explorer/reminders.rs:429
+msgid "Recordatorio borrado"
+msgstr "Reminder deleted"
 
 #: src/explorer/todos.rs:13
 msgid "Ninguna"
@@ -388,7 +556,7 @@ msgstr "All pending"
 msgid "No hay tareas"
 msgstr "No tasks"
 
-#: src/explorer/todos.rs:268 src/tools.rs:294
+#: src/explorer/todos.rs:268 src/tools.rs:335
 msgid "Tarea borrada: {text}"
 msgstr "Task deleted: {text}"
 
@@ -444,15 +612,15 @@ msgstr "Medium priority"
 msgid "Prioridad baja"
 msgstr "Low priority"
 
-#: src/indicator.rs:36
+#: src/indicator.rs:37
 msgid "Descartar"
 msgstr "Discard"
 
-#: src/indicator.rs:42 src/popup.rs:216
+#: src/indicator.rs:43 src/popup.rs:297
 msgid "Parar y enviar"
 msgstr "Stop and send"
 
-#: src/indicator.rs:63
+#: src/indicator.rs:64
 msgid "Grabando"
 msgstr "Recording"
 
@@ -464,126 +632,131 @@ msgstr "no category"
 msgid "El modelo ha rechazado la petición ({category})"
 msgstr "The model declined the request ({category})"
 
-#: src/llm/mod.rs:98
+#: src/llm/mod.rs:102
 msgid "No hay modelo configurado para {provider}"
 msgstr "No model is configured for {provider}"
 
-#: src/llm/mod.rs:102
+#: src/llm/mod.rs:106
 msgid "Falta la API key de {provider}"
 msgstr "The {provider} API key is missing"
 
-#: src/llm/mod.rs:233
+#: src/llm/mod.rs:127
+msgid ""
+"[El usuario ha adjuntado {count} imágenes, pero este modelo no puede verlas.]"
+msgstr "[The user attached {count} images, but this model cannot see them.]"
+
+#: src/llm/mod.rs:272
 msgid "El modelo ha encadenado demasiadas llamadas a tools sin terminar"
 msgstr "The model chained too many tool calls without finishing"
 
-#: src/llm/ollama.rs:40 src/llm/openai.rs:38
+#: src/llm/ollama.rs:40 src/llm/openai_responses.rs:102 src/llm/openai.rs:38
 msgid "Respuesta sin mensaje: {response}"
 msgstr "Response without a message: {response}"
 
-#: src/llm/openai.rs:41
+#: src/llm/openai_responses.rs:74 src/llm/openai.rs:41
 msgid "El modelo ha rechazado la petición: {reason}"
 msgstr "The model declined the request: {reason}"
 
-#: src/main.rs:34
+#: src/main.rs:39
 msgid "Empezar o parar una grabación"
 msgstr "Start or stop a recording"
 
-#: src/main.rs:35
+#: src/main.rs:40
 msgid "Abrir el popup para escribir"
 msgstr "Open the popup to type"
 
-#: src/main.rs:36
+#: src/main.rs:41
 msgid "Mostrar la última conversación"
 msgstr "Show the last conversation"
 
-#: src/main.rs:37
+#: src/main.rs:42
 msgid "Abrir la ventana de notas, tareas e historial"
 msgstr "Open the notes, tasks and history window"
 
-#: src/main.rs:38
+#: src/main.rs:43
 msgid "Abrir las preferencias"
 msgstr "Open the preferences"
 
-#: src/main.rs:39
+#: src/main.rs:44
 msgid "Abrir una conversación del historial para seguirla"
 msgstr "Open a conversation from the history to continue it"
 
-#: src/main.rs:40
+#: src/main.rs:45
 msgid "Cerrar el asistente"
 msgstr "Quit the assistant"
 
-#: src/main.rs:41
+#: src/main.rs:46
 msgid "Listar las conversaciones guardadas"
 msgstr "List the saved conversations"
 
-#: src/main.rs:42
+#: src/main.rs:47
 msgid "Listar los modelos del proveedor de LLM configurado"
 msgstr "List the models of the configured LLM provider"
 
-#: src/main.rs:43
+#: src/main.rs:48
 msgid "Mostrar la ruta del archivo de configuración"
 msgstr "Show the path of the configuration file"
 
-#: src/main.rs:47
+#: src/main.rs:52
 msgid "Uso: gnome-personal-assistant [ORDEN]"
 msgstr "Usage: gnome-personal-assistant [COMMAND]"
 
-#: src/main.rs:48
+#: src/main.rs:53
 msgid ""
 "Sin orden arranca el asistente en segundo plano (icono de bandeja y atajos)."
 msgstr ""
 "Without a command, the assistant starts in the background (tray icon and "
 "shortcuts)."
 
-#: src/main.rs:49
+#: src/main.rs:54
 msgid "Si ya está en marcha, las órdenes se envían a esa instancia:"
 msgstr "If it is already running, commands are sent to that instance:"
 
-#: src/main.rs:80
+#: src/main.rs:85
 msgid "No se pudo iniciar GStreamer: {error}"
 msgstr "Could not initialize GStreamer: {error}"
 
-#: src/main.rs:120
+#: src/main.rs:125
 msgid "Uso: gnome-personal-assistant open ID"
 msgstr "Usage: gnome-personal-assistant open ID"
 
-#: src/main.rs:125
+#: src/main.rs:130
 msgid "Orden desconocida: {command}"
 msgstr "Unknown command: {command}"
 
-#: src/main.rs:186
+#: src/main.rs:198
 msgid "{provider} (modelo actual: {model})"
 msgstr "{provider} (current model: {model})"
 
-#: src/popup.rs:35
+#: src/popup.rs:39
 msgid "Nueva conversación"
 msgstr "New conversation"
 
-#: src/popup.rs:40
+#: src/popup.rs:44
 msgid "Notas, tareas e historial"
 msgstr "Notes, tasks and history"
 
-#: src/popup.rs:58
+#: src/popup.rs:62
 msgid "Escribe o pulsa el micrófono…"
 msgstr "Type or press the microphone…"
 
-#: src/popup.rs:63 src/popup.rs:220 src/tray.rs:78
+#: src/popup.rs:67 src/popup.rs:301 src/record_dialog.rs:25 src/tray.rs:78
 msgid "Grabar"
 msgstr "Record"
 
-#: src/popup.rs:67
+#: src/popup.rs:71
 msgid "Enviar"
 msgstr "Send"
 
-#: src/popup.rs:180
+#: src/popup.rs:261
 msgid "Esperando confirmación…"
 msgstr "Waiting for confirmation…"
 
-#: src/popup.rs:189
+#: src/popup.rs:270
 msgid "Borrado confirmado"
 msgstr "Deletion confirmed"
 
-#: src/popup.rs:189 src/tools.rs:75
+#: src/popup.rs:270 src/tools.rs:102
 msgid "Borrado cancelado"
 msgstr "Deletion cancelled"
 
@@ -599,126 +772,143 @@ msgstr "Hold the shortcut down"
 msgid "Parar sola al detectar silencio"
 msgstr "Stop automatically on silence"
 
-#: src/preferences.rs:51
+#: src/preferences.rs:52
 msgid "Proveedor"
 msgstr "Provider"
 
-#: src/preferences.rs:54 src/preferences.rs:427
+#: src/preferences.rs:55 src/preferences.rs:468
 msgid "URL base"
 msgstr "Base URL"
 
-#: src/preferences.rs:55
+#: src/preferences.rs:56
 msgid "API key"
 msgstr "API key"
 
-#: src/preferences.rs:56 src/preferences.rs:411
+#: src/preferences.rs:57 src/preferences.rs:452
 msgid "Modelo"
 msgstr "Model"
 
-#: src/preferences.rs:115
+#: src/preferences.rs:62
+msgid "El modelo admite imágenes"
+msgstr "The model accepts images"
+
+#: src/preferences.rs:63
+msgid "Si no, solo se le dice que hay imágenes adjuntas"
+msgstr "Otherwise it is only told that images are attached"
+
+#: src/preferences.rs:121
 msgid "Consultando modelos…"
 msgstr "Fetching models…"
 
-#: src/preferences.rs:130
+#: src/preferences.rs:136
 msgid "El proveedor no ha devuelto modelos"
 msgstr "The provider returned no models"
 
-#: src/preferences.rs:146
+#: src/preferences.rs:152
 msgid "Clave guardada en el llavero"
 msgstr "Key saved in the keyring"
 
-#: src/preferences.rs:147
+#: src/preferences.rs:153
 msgid "No se pudo guardar la clave: {error}"
 msgstr "Could not save the key: {error}"
 
-#: src/preferences.rs:153
+#: src/preferences.rs:159
 msgid "General"
 msgstr "General"
 
-#: src/preferences.rs:156
+#: src/preferences.rs:162
 msgid "Instrucciones del asistente"
 msgstr "Assistant instructions"
 
-#: src/preferences.rs:157
+#: src/preferences.rs:163
 msgid "Cómo debe comportarse. Se aplican a las conversaciones nuevas."
 msgstr "How it should behave. They apply to new conversations."
 
-#: src/preferences.rs:184
+#: src/preferences.rs:190
 msgid "Restaurar las instrucciones por defecto"
 msgstr "Restore the default instructions"
 
-#: src/preferences.rs:193
+#: src/preferences.rs:199
 msgid "Aplicación"
 msgstr "Application"
 
-#: src/preferences.rs:195
+#: src/preferences.rs:201
 msgid "Arrancar al iniciar sesión"
 msgstr "Start on login"
 
-#: src/preferences.rs:196
+#: src/preferences.rs:202
 msgid "Necesario para los atajos y los recordatorios"
 msgstr "Needed for the shortcuts and reminders"
 
-#: src/preferences.rs:208
+#: src/preferences.rs:214
 msgid "Automático (idioma del sistema)"
 msgstr "Automatic (system language)"
 
-#: src/preferences.rs:210
+#: src/preferences.rs:216
 msgid "Idioma de la interfaz"
 msgstr "Interface language"
 
-#: src/preferences.rs:211
+#: src/preferences.rs:217
 msgid "Se aplica al reiniciar la aplicación"
 msgstr "Applies after restarting the application"
 
-#: src/preferences.rs:226
-msgid "Recordatorios de tareas"
-msgstr "Task reminders"
+#: src/preferences.rs:232
+msgid "Recordatorios y avisos de tareas"
+msgstr "Reminders and task alerts"
 
-#: src/preferences.rs:227
-msgid ""
-"Avisan con una notificación cuando llega la fecha o la hora de aviso de una "
-"tarea."
-msgstr ""
-"A notification is shown when a task's due date or reminder time arrives."
+#: src/preferences.rs:233
+msgid "Avisan cuando llega la hora de un recordatorio o la fecha de una tarea."
+msgstr "You are alerted when a reminder's time or a task's date arrives."
 
-#: src/preferences.rs:229
+#: src/preferences.rs:235
 msgid "Avisar de las tareas"
 msgstr "Remind me of tasks"
 
-#: src/preferences.rs:231
+#: src/preferences.rs:237
 msgid "Hora del aviso de las tareas sin hora (HH:MM)"
 msgstr "Reminder time for tasks without a time (HH:MM)"
 
-#: src/preferences.rs:248
+#: src/preferences.rs:251
+msgid "Opciones de posponer (10m, 1h, 1d, tomorrow…)"
+msgstr "Snooze options (10m, 1h, 1d, tomorrow…)"
+
+#: src/preferences.rs:263
+msgid "Repetir la alarma hasta que lo atienda"
+msgstr "Repeat the alarm until I respond"
+
+#: src/preferences.rs:264
+msgid "Durante dos minutos como máximo"
+msgstr "For two minutes at most"
+
+#: src/preferences.rs:278
 msgid "Atajos de teclado"
 msgstr "Keyboard shortcuts"
 
-#: src/preferences.rs:250
+#: src/preferences.rs:280
 msgid "Atajos globales"
 msgstr "Global shortcuts"
 
-#: src/preferences.rs:251
+#: src/preferences.rs:281
 msgid ""
-"Por defecto Super+Alt+Espacio graba y Super+Alt+R reabre la última "
-"conversación"
+"Por defecto: Super+Alt+Espacio graba, Super+Alt+S captura la pantalla y "
+"graba, Super+Alt+R reabre la última conversación"
 msgstr ""
-"By default Super+Alt+Space records and Super+Alt+R reopens the last "
-"conversation"
+"By default: Super+Alt+Space records, Super+Alt+S captures the screen and "
+"records, Super+Alt+R reopens the last conversation"
 
-#: src/preferences.rs:253
+#: src/preferences.rs:283
 msgid "Cambiar…"
 msgstr "Change…"
 
-#: src/preferences.rs:265
+#: src/preferences.rs:295
 msgid "IA"
 msgstr "AI"
 
-#: src/preferences.rs:269
+#: src/preferences.rs:299
 msgid "Modelo de lenguaje"
 msgstr "Language model"
 
-#: src/preferences.rs:270
+#: src/preferences.rs:300
 msgid ""
 "El proveedor y el modelo que responden. Las conversaciones ya empezadas "
 "siguen con su modelo."
@@ -726,23 +916,23 @@ msgstr ""
 "The provider and model that answer. Conversations already started keep their "
 "model."
 
-#: src/preferences.rs:289
+#: src/preferences.rs:319
 msgid "Elegir de los modelos disponibles"
 msgstr "Choose from the available models"
 
-#: src/preferences.rs:295
+#: src/preferences.rs:325
 msgid "Comprobar la conexión"
 msgstr "Test the connection"
 
-#: src/preferences.rs:389
+#: src/preferences.rs:430
 msgid "Conexión correcta: {count} modelos disponibles"
 msgstr "Connection OK: {count} models available"
 
-#: src/preferences.rs:399
+#: src/preferences.rs:440
 msgid "Transcripción"
 msgstr "Transcription"
 
-#: src/preferences.rs:400
+#: src/preferences.rs:441
 msgid ""
 "Convierte tu voz en texto. Si no pones una clave propia se usa la de OpenAI "
 "de arriba."
@@ -750,39 +940,39 @@ msgstr ""
 "Turns your voice into text. Without its own key, the OpenAI key above is "
 "used."
 
-#: src/preferences.rs:404
+#: src/preferences.rs:445
 msgid "Servicio"
 msgstr "Service"
 
-#: src/preferences.rs:419
+#: src/preferences.rs:460
 msgid "Idioma (código como «es»; vacío = detectar)"
 msgstr "Language (a code such as “en”; empty = detect)"
 
-#: src/preferences.rs:423
+#: src/preferences.rs:464
 msgid "API key propia (opcional)"
 msgstr "Own API key (optional)"
 
-#: src/preferences.rs:474 src/preferences.rs:477
+#: src/preferences.rs:515 src/preferences.rs:518
 msgid "Grabación"
 msgstr "Recording"
 
-#: src/preferences.rs:479
+#: src/preferences.rs:520
 msgid "Modo del atajo"
 msgstr "Shortcut mode"
 
-#: src/preferences.rs:484
+#: src/preferences.rs:525
 msgid "Silencio para parar"
 msgstr "Silence before stopping"
 
-#: src/preferences.rs:485
+#: src/preferences.rs:526
 msgid "Segundos sin voz tras los que se para en el modo automático"
 msgstr "Seconds without speech after which automatic mode stops"
 
-#: src/preferences.rs:490
+#: src/preferences.rs:531
 msgid "Umbral de voz (dB)"
 msgstr "Speech threshold (dB)"
 
-#: src/preferences.rs:491
+#: src/preferences.rs:532
 msgid ""
 "Sube el número si el ruido de fondo impide que pare; bájalo si corta "
 "mientras hablas"
@@ -790,159 +980,213 @@ msgstr ""
 "Raise it if background noise keeps recording going; lower it if it cuts you "
 "off while speaking"
 
-#: src/preferences.rs:495
+#: src/preferences.rs:536
 msgid "Duración máxima (segundos)"
 msgstr "Maximum length (seconds)"
 
-#: src/preferences.rs:503
+#: src/preferences.rs:544
 msgid "Predeterminado del sistema"
 msgstr "System default"
 
-#: src/preferences.rs:506
+#: src/preferences.rs:547
 msgid "Micrófono"
 msgstr "Microphone"
 
-#: src/preferences.rs:511
+#: src/preferences.rs:552
 msgid "Avisos"
 msgstr "Feedback"
 
-#: src/preferences.rs:512
+#: src/preferences.rs:553
 msgid "Sonidos al empezar y al parar"
 msgstr "Sounds when starting and stopping"
 
-#: src/preferences.rs:514
+#: src/preferences.rs:555
 msgid "Ventanita de grabación"
 msgstr "Recording indicator"
 
-#: src/preferences.rs:515
+#: src/preferences.rs:556
 msgid "Muestra el tiempo y el nivel del micrófono mientras grabas"
 msgstr "Shows the time and microphone level while recording"
 
-#: src/preferences.rs:581
+#: src/preferences.rs:622
 msgid "Datos"
 msgstr "Data"
 
-#: src/preferences.rs:585
+#: src/preferences.rs:626
 msgid "Grabaciones"
 msgstr "Recordings"
 
-#: src/preferences.rs:586
+#: src/preferences.rs:627
 msgid "Las grabaciones adjuntas a notas se conservan siempre."
 msgstr "Recordings attached to notes are always kept."
 
-#: src/preferences.rs:589
+#: src/preferences.rs:630
 msgid "Guardar el audio"
 msgstr "Keep audio"
 
-#: src/preferences.rs:590
+#: src/preferences.rs:631
 msgid "Solo el adjunto a notas"
 msgstr "Only when attached to notes"
 
-#: src/preferences.rs:590
+#: src/preferences.rs:631
 msgid "Siempre, en el historial"
 msgstr "Always, in the history"
 
-#: src/preferences.rs:597
+#: src/preferences.rs:638
 msgid "Borrar las del historial tras (días)"
 msgstr "Delete history recordings after (days)"
 
-#: src/preferences.rs:598
+#: src/preferences.rs:639
 msgid "0 = no borrarlas nunca"
 msgstr "0 = never delete them"
 
-#: src/preferences.rs:607
+#: src/preferences.rs:648
 msgid "Carpeta de datos"
 msgstr "Data folder"
+
+#: src/record_dialog.rs:31
+msgid "Pulsa para empezar a grabar"
+msgstr "Press to start recording"
+
+#: src/record_dialog.rs:46
+msgid "Grabar audio"
+msgstr "Record audio"
+
+#: src/record_dialog.rs:78
+msgid "Parar"
+msgstr "Stop"
+
+#: src/record_dialog.rs:79 src/tray.rs:49
+msgid "Grabando…"
+msgstr "Recording…"
+
+#: src/reminders.rs:79
+msgid "Mañana a las {time}"
+msgstr "Tomorrow at {time}"
+
+#: src/reminders.rs:83
+msgid "{n} min"
+msgstr "{n} min"
+
+#: src/reminders.rs:84
+msgid "{n} h"
+msgstr "{n} h"
+
+#: src/reminders.rs:85
+msgid "{n} días"
+msgstr "{n} days"
+
+#: src/reminder_window.rs:68
+msgid "Posponer"
+msgstr "Snooze"
 
 #: src/secrets.rs:25 src/secrets.rs:45
 msgid "No se pudo abrir el llavero"
 msgstr "Could not open the keyring"
 
-#: src/shortcuts.rs:33
+#: src/shortcuts.rs:34
 msgid "No se pudo registrar la app en el portal"
 msgstr "Could not register the app with the portal"
 
-#: src/shortcuts.rs:37
+#: src/shortcuts.rs:38
 msgid "El portal GlobalShortcuts no está disponible"
 msgstr "The GlobalShortcuts portal is not available"
 
-#: src/shortcuts.rs:54
+#: src/shortcuts.rs:55
 msgid "Grabar y preguntar al asistente"
 msgstr "Record and ask the assistant"
 
-#: src/shortcuts.rs:56
+#: src/shortcuts.rs:57
 msgid "Reabrir la última conversación"
 msgstr "Reopen the last conversation"
 
-#: src/store.rs:136
+#: src/shortcuts.rs:59
+msgid "Capturar la pantalla y preguntar"
+msgstr "Capture the screen and ask"
+
+#: src/store.rs:173
 msgid "Prioridad desconocida: {value} (usa high, medium, low o none)"
 msgstr "Unknown priority: {value} (use high, medium, low or none)"
 
-#: src/store.rs:343
+#: src/store.rs:312
+msgid ""
+"Repetición desconocida: {value} (usa none, daily, weekly, monthly o yearly)"
+msgstr ""
+"Unknown repetition: {value} (use none, daily, weekly, monthly or yearly)"
+
+#: src/store.rs:507
 msgid "No se pudo abrir {path}"
 msgstr "Could not open {path}"
 
-#: src/store.rs:383 src/store.rs:391
+#: src/store.rs:547 src/store.rs:555
 msgid "El cuaderno necesita un nombre"
 msgstr "The notebook needs a name"
 
-#: src/store.rs:386
+#: src/store.rs:550
 msgid "Ya existe un cuaderno llamado «{name}»"
 msgstr "A notebook named “{name}” already exists"
 
-#: src/store.rs:423
+#: src/store.rs:587
 msgid "La nota necesita un título"
 msgstr "The note needs a title"
 
-#: src/store.rs:478
+#: src/store.rs:643 src/store.rs:1200
 msgid "El título no puede estar vacío"
 msgstr "The title cannot be empty"
 
-#: src/store.rs:607 src/store.rs:615
+#: src/store.rs:773 src/store.rs:781
 msgid "La lista necesita un nombre"
 msgstr "The list needs a name"
 
-#: src/store.rs:610
+#: src/store.rs:776
 msgid "Ya existe una lista llamada «{name}»"
 msgstr "A list named “{name}” already exists"
 
-#: src/store.rs:648
+#: src/store.rs:814
 msgid "La tarea necesita un texto"
 msgstr "The task needs some text"
 
-#: src/store.rs:649
+#: src/store.rs:815
 msgid "Indica la lista de la tarea"
 msgstr "Specify the task's list"
 
-#: src/store.rs:678
+#: src/store.rs:844
 msgid "El texto no puede estar vacío"
 msgstr "The text cannot be empty"
 
-#: src/store.rs:692
+#: src/store.rs:858
 msgid "Indica la lista"
 msgstr "Specify the list"
 
-#: src/store.rs:950
+#: src/store.rs:1173
+msgid "El recordatorio necesita un título"
+msgstr "The reminder needs a title"
+
+#: src/store.rs:1345
 msgid "No existe el cuaderno {id}"
 msgstr "Notebook {id} does not exist"
 
-#: src/store.rs:951
+#: src/store.rs:1346
 msgid "No existe la nota {id}"
 msgstr "Note {id} does not exist"
 
-#: src/store.rs:952
+#: src/store.rs:1347
 msgid "No existe la lista {id}"
 msgstr "List {id} does not exist"
 
-#: src/store.rs:953
+#: src/store.rs:1348
 msgid "No existe la tarea {id}"
 msgstr "Task {id} does not exist"
 
-#: src/store.rs:954
+#: src/store.rs:1349
 msgid "No existe la conversación {id}"
 msgstr "Conversation {id} does not exist"
 
-#: src/store.rs:977
+#: src/store.rs:1350
+msgid "No existe el recordatorio {id}"
+msgstr "Reminder {id} does not exist"
+
+#: src/store.rs:1373
 msgid "Fecha no válida: «{date}» (usa YYYY-MM-DD o YYYY-MM-DD HH:MM)"
 msgstr "Invalid date: “{date}” (use YYYY-MM-DD or YYYY-MM-DD HH:MM)"
 
@@ -954,117 +1198,160 @@ msgstr "The OpenAI API key for transcription is missing"
 msgid "No se pudo leer {path}"
 msgstr "Could not read {path}"
 
-#: src/tools.rs:100
-msgid " (con audio)"
-msgstr " (with audio)"
+#: src/tools.rs:70
+msgid ""
+"Valor de attach desconocido: {value} (usa none, current, conversation o "
+"selected)"
+msgstr ""
+"Unknown attach value: {value} (use none, current, conversation or selected)"
 
-#: src/tools.rs:101
-msgid "Nota creada: «{title}»{audio}"
-msgstr "Note created: “{title}”{audio}"
+#: src/tools.rs:81
+msgid " ({count} adjuntos)"
+msgstr " ({count} attachments)"
 
-#: src/tools.rs:118
+#: src/tools.rs:124
+msgid "Nota creada: «{title}»{attachments}"
+msgstr "Note created: “{title}”{attachments}"
+
+#: src/tools.rs:129 src/tools.rs:146
+msgid "Adjuntos consultados"
+msgstr "Attachments listed"
+
+#: src/tools.rs:162
 msgid "Nota leída: «{title}»"
 msgstr "Note read: “{title}”"
 
-#: src/tools.rs:143
+#: src/tools.rs:187
 msgid "Búsqueda de notas: {count} resultados"
 msgstr "Note search: {count} results"
 
-#: src/tools.rs:152
-msgid "Nota actualizada: «{title}»"
-msgstr "Note updated: “{title}”"
+#: src/tools.rs:199
+msgid "Nota actualizada: «{title}»{attachments}"
+msgstr "Note updated: “{title}”{attachments}"
 
-#: src/tools.rs:159
+#: src/tools.rs:207
 msgid "¿Borrar la nota «{title}»?"
 msgstr "Delete the note “{title}”?"
 
-#: src/tools.rs:160
+#: src/tools.rs:208
 msgid "Nota borrada: «{title}»"
 msgstr "Note deleted: “{title}”"
 
-#: src/tools.rs:174
+#: src/tools.rs:215
 msgid "Cuadernos consultados"
 msgstr "Notebooks listed"
 
-#: src/tools.rs:179
+#: src/tools.rs:220
 msgid "Cuaderno creado: «{name}»"
 msgstr "Notebook created: “{name}”"
 
-#: src/tools.rs:184
+#: src/tools.rs:225
 msgid "Cuaderno renombrado: «{name}»"
 msgstr "Notebook renamed: “{name}”"
 
-#: src/tools.rs:191
+#: src/tools.rs:232
 msgid "¿Borrar el cuaderno «{name}»? Sus notas se conservan, sin cuaderno."
 msgstr "Delete the notebook “{name}”? Its notes are kept, without a notebook."
 
-#: src/tools.rs:192
+#: src/tools.rs:233
 msgid "Cuaderno borrado: «{name}»"
 msgstr "Notebook deleted: “{name}”"
 
-#: src/tools.rs:203
+#: src/tools.rs:244
 msgid "Etiquetas consultadas"
 msgstr "Tags listed"
 
-#: src/tools.rs:207
+#: src/tools.rs:248
 msgid "Listas consultadas"
 msgstr "Lists listed"
 
-#: src/tools.rs:212
+#: src/tools.rs:253
 msgid "Lista creada: «{name}»"
 msgstr "List created: “{name}”"
 
-#: src/tools.rs:217
+#: src/tools.rs:258
 msgid "Lista renombrada: «{name}»"
 msgstr "List renamed: “{name}”"
 
-#: src/tools.rs:224
+#: src/tools.rs:265
 msgid "¿Borrar la lista «{name}» y sus {count} tareas?"
 msgstr "Delete the list “{name}” and its {count} tasks?"
 
-#: src/tools.rs:225
+#: src/tools.rs:266
 msgid "Lista borrada: «{name}»"
 msgstr "List deleted: “{name}”"
 
-#: src/tools.rs:239
+#: src/tools.rs:280
 msgid "Tarea añadida a «{list}»: {text}"
 msgstr "Task added to “{list}”: {text}"
 
-#: src/tools.rs:247
+#: src/tools.rs:288 src/tools.rs:369
 msgid "Estado desconocido: {value} (usa pending, done o all)"
 msgstr "Unknown status: {value} (use pending, done or all)"
 
-#: src/tools.rs:258
+#: src/tools.rs:299
 msgid "Tareas consultadas: {count}"
 msgstr "Tasks listed: {count}"
 
-#: src/tools.rs:278
+#: src/tools.rs:319
 msgid "Tarea actualizada: {text}"
 msgstr "Task updated: {text}"
 
-#: src/tools.rs:285
+#: src/tools.rs:326
 msgid "Tarea completada: {text}"
 msgstr "Task completed: {text}"
 
-#: src/tools.rs:285
+#: src/tools.rs:326
 msgid "Tarea pendiente de nuevo: {text}"
 msgstr "Task pending again: {text}"
 
-#: src/tools.rs:293
+#: src/tools.rs:334
 msgid "¿Borrar la tarea «{text}» de «{list}»?"
 msgstr "Delete the task “{text}” from “{list}”?"
 
-#: src/tools.rs:311
+#: src/tools.rs:354
+msgid "Recordatorio creado: «{title}», {date}{attachments}"
+msgstr "Reminder created: “{title}”, {date}{attachments}"
+
+#: src/tools.rs:373
+msgid "Recordatorios consultados: {count}"
+msgstr "Reminders listed: {count}"
+
+#: src/tools.rs:380
+msgid "Recordatorio leído: «{title}»"
+msgstr "Reminder read: “{title}”"
+
+#: src/tools.rs:398
+msgid "Recordatorio actualizado: «{title}»{attachments}"
+msgstr "Reminder updated: “{title}”{attachments}"
+
+#: src/tools.rs:405
+msgid "Recordatorio completado: «{title}»"
+msgstr "Reminder completed: “{title}”"
+
+#: src/tools.rs:407
+msgid "Recordatorio hecho; el siguiente es el {date}"
+msgstr "Reminder done; the next one is on {date}"
+
+#: src/tools.rs:416
+msgid "¿Borrar el recordatorio «{title}»?"
+msgstr "Delete the reminder “{title}”?"
+
+#: src/tools.rs:417
+msgid "Recordatorio borrado: «{title}»"
+msgstr "Reminder deleted: “{title}”"
+
+#: src/tools.rs:422
+msgid "La tool {name} no existe"
+msgstr "The tool {name} does not exist"
+
+#: src/tools.rs:434
 msgid "Argumentos no válidos"
 msgstr "Invalid arguments"
 
 #: src/tray.rs:48
 msgid "Listo"
 msgstr "Ready"
-
-#: src/tray.rs:49
-msgid "Grabando…"
-msgstr "Recording…"
 
 #: src/tray.rs:51
 msgid "Ha ocurrido un error"

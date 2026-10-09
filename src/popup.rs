@@ -6,7 +6,9 @@ use adw::prelude::*;
 use gtk::glib;
 
 use crate::app::Command;
+use crate::attachment_view::{AddOptions, add_button, pending_widget};
 use crate::conversation_view::{ConversationView, wrapped_label};
+use crate::store::NewAttachment;
 use crate::i18n::tr;
 
 pub struct Popup {
@@ -17,6 +19,8 @@ pub struct Popup {
     entry: gtk::Entry,
     mic: gtk::Button,
     send: gtk::Button,
+    pending: gtk::Box,
+    commands: async_channel::Sender<Command>,
 }
 
 impl Popup {
@@ -74,13 +78,33 @@ impl Popup {
             .margin_start(12)
             .margin_end(12)
             .build();
+        let attach = add_button(
+            AddOptions::ImagesOnly,
+            Rc::new(crate::config::SttConfig::default),
+            Rc::new({
+                let commands = commands.clone();
+                move |attachment| {
+                    let _ = commands.try_send(Command::AddPending(attachment));
+                }
+            }),
+            Rc::new({
+                let commands = commands.clone();
+                move |message| {
+                    let _ = commands.try_send(Command::AttachmentError(message));
+                }
+            }),
+        );
+        input.append(&attach);
         input.append(&entry);
         input.append(&mic);
         input.append(&send);
+        // Imágenes que irán con el próximo mensaje.
+        let pending = gtk::Box::builder().margin_start(12).margin_end(12).visible(false).build();
 
         let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
         body.append(view.widget());
         body.append(&status);
+        body.append(&pending);
         body.append(&input);
 
         let toolbar = adw::ToolbarView::new();
@@ -88,23 +112,57 @@ impl Popup {
         toolbar.set_content(Some(&body));
         window.set_content(Some(&toolbar));
 
-        // Esc cierra (oculta) la ventana.
-        let keys = gtk::EventControllerKey::new();
+        // Esc cierra (oculta) la ventana; Ctrl+V con una imagen en el portapapeles la adjunta.
+        let keys = gtk::EventControllerKey::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
         keys.connect_key_pressed(glib::clone!(
             #[weak]
             window,
+            #[strong]
+            commands,
             #[upgrade_or]
             glib::Propagation::Proceed,
-            move |_, key, _, _| {
+            move |_, key, _, modifiers| {
                 if key == gtk::gdk::Key::Escape {
                     window.close();
-                    glib::Propagation::Stop
-                } else {
-                    glib::Propagation::Proceed
+                    return glib::Propagation::Stop;
                 }
+                let paste = matches!(key, gtk::gdk::Key::v | gtk::gdk::Key::V) && modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
+                let has_image = gtk::gdk::Display::default()
+                    .is_some_and(|d| d.clipboard().formats().contains_type(gtk::gdk::Texture::static_type()));
+                if paste && has_image {
+                    let commands = commands.clone();
+                    glib::spawn_future_local(async move {
+                        let command = match crate::attachments::paste_image().await {
+                            Ok(attachment) => Command::AddPending(attachment),
+                            Err(err) => Command::AttachmentError(format!("{err:#}")),
+                        };
+                        let _ = commands.try_send(command);
+                    });
+                    return glib::Propagation::Stop;
+                }
+                glib::Propagation::Proceed
             }
         ));
         window.add_controller(keys);
+
+        // Arrastrar imágenes a la ventana.
+        let drop = gtk::DropTarget::new(gtk::gdk::FileList::static_type(), gtk::gdk::DragAction::COPY);
+        drop.connect_drop(glib::clone!(
+            #[strong]
+            commands,
+            move |_, value, _, _| {
+                let Ok(files) = value.get::<gtk::gdk::FileList>() else { return false };
+                for path in files.files().iter().filter_map(|f| f.path()) {
+                    let command = match crate::attachments::import_image(&path) {
+                        Ok(attachment) => Command::AddPending(attachment),
+                        Err(err) => Command::AttachmentError(format!("{err:#}")),
+                    };
+                    let _ = commands.try_send(command);
+                }
+                true
+            }
+        ));
+        window.add_controller(drop);
 
         let submit = {
             let commands = commands.clone();
@@ -136,7 +194,7 @@ impl Popup {
             });
         }
 
-        Self { window, view, status, status_label, entry, mic, send }
+        Self { window, view, status, status_label, entry, mic, send, pending, commands }
     }
 
     pub fn window(&self) -> &adw::Window {
@@ -156,6 +214,26 @@ impl Popup {
         // seleccione entero) el primer mensaje.
         GtkWindowExt::set_focus(&self.window, Some(&self.entry));
         self.window.present();
+    }
+
+    /// Muestra las imágenes pendientes de enviar.
+    pub fn set_pending(&self, attachments: &[NewAttachment]) {
+        while let Some(child) = self.pending.first_child() {
+            self.pending.remove(&child);
+        }
+        self.pending.set_visible(!attachments.is_empty());
+        if attachments.is_empty() {
+            return;
+        }
+        let commands = self.commands.clone();
+        let gallery = pending_widget(
+            attachments,
+            Rc::new(move |index| {
+                let _ = commands.try_send(Command::RemovePending(index));
+            }),
+        );
+        gallery.set_hexpand(true);
+        self.pending.append(&gallery);
     }
 
     pub fn is_active(&self) -> bool {

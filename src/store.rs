@@ -98,6 +98,43 @@ CREATE TABLE todos (
     completed   INTEGER
 );
 CREATE INDEX todos_list ON todos(list_id);
+"#, r#"
+CREATE TABLE reminders (
+    id              INTEGER PRIMARY KEY,
+    title           TEXT NOT NULL,
+    body            TEXT NOT NULL DEFAULT '',
+    due_at          INTEGER NOT NULL,   -- próximo aviso (unix)
+    anchor_at       INTEGER NOT NULL,   -- primera fecha; las repeticiones se calculan desde aquí
+    repeat          TEXT NOT NULL DEFAULT 'none',
+    done            INTEGER NOT NULL DEFAULT 0,
+    notified        INTEGER NOT NULL DEFAULT 0,
+    conversation_id INTEGER REFERENCES conversations(id) ON DELETE SET NULL,
+    created         INTEGER NOT NULL,
+    completed       INTEGER
+);
+CREATE INDEX reminders_due ON reminders(done, due_at);
+-- Audios e imágenes. Un mismo archivo puede estar en varias filas (el audio de un
+-- mensaje copiado a una nota); el archivo se borra cuando ninguna fila lo usa.
+CREATE TABLE attachments (
+    id          INTEGER PRIMARY KEY,
+    kind        TEXT NOT NULL,          -- audio | image
+    path        TEXT NOT NULL,
+    mime        TEXT NOT NULL,
+    transcript  TEXT,
+    note_id     INTEGER REFERENCES notes(id) ON DELETE CASCADE,
+    reminder_id INTEGER REFERENCES reminders(id) ON DELETE CASCADE,
+    message_id  INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+    created     INTEGER NOT NULL
+);
+CREATE INDEX attachments_note ON attachments(note_id);
+CREATE INDEX attachments_reminder ON attachments(reminder_id);
+CREATE INDEX attachments_message ON attachments(message_id);
+INSERT INTO attachments (kind, path, mime, transcript, note_id, created)
+    SELECT 'audio', audio_path, 'audio/ogg', transcript, id, created FROM notes WHERE audio_path IS NOT NULL;
+INSERT INTO attachments (kind, path, mime, transcript, message_id, created)
+    SELECT 'audio', audio_path, 'audio/ogg', content, id, created FROM messages WHERE audio_path IS NOT NULL;
+ALTER TABLE notes DROP COLUMN audio_path;
+ALTER TABLE messages DROP COLUMN audio_path;
 "#];
 
 fn now() -> i64 {
@@ -145,6 +182,72 @@ pub struct Notebook {
     pub notes: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AttachmentKind {
+    Audio,
+    Image,
+}
+
+impl AttachmentKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Audio => "audio",
+            Self::Image => "image",
+        }
+    }
+
+    fn parse(text: &str) -> Self {
+        if text == "image" { Self::Image } else { Self::Audio }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Attachment {
+    pub id: i64,
+    pub kind: AttachmentKind,
+    #[serde(skip)]
+    pub path: String,
+    pub mime: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<String>,
+    pub created: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewAttachment {
+    pub kind: AttachmentKind,
+    pub path: String,
+    pub mime: String,
+    pub transcript: Option<String>,
+}
+
+/// A qué pertenece un adjunto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Owner {
+    Note(i64),
+    Reminder(i64),
+    Message(i64),
+}
+
+impl Owner {
+    fn column(self) -> (&'static str, i64) {
+        match self {
+            Self::Note(id) => ("note_id", id),
+            Self::Reminder(id) => ("reminder_id", id),
+            Self::Message(id) => ("message_id", id),
+        }
+    }
+}
+
+/// Adjunto de un mensaje del usuario en una conversación.
+#[derive(Debug, Clone)]
+pub struct ConversationAttachment {
+    pub attachment: Attachment,
+    pub message_id: i64,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Note {
     pub id: i64,
@@ -152,11 +255,7 @@ pub struct Note {
     pub content: String,
     pub notebook: Option<String>,
     pub tags: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub transcript: Option<String>,
-    #[serde(skip)]
-    pub audio_path: Option<String>,
-    pub has_audio: bool,
+    pub attachments: Vec<Attachment>,
     pub created: i64,
     pub modified: i64,
 }
@@ -168,7 +267,8 @@ pub struct NoteSummary {
     pub notebook: Option<String>,
     pub tags: Vec<String>,
     pub snippet: String,
-    pub has_audio: bool,
+    pub audios: i64,
+    pub images: i64,
     pub modified: i64,
 }
 
@@ -178,9 +278,72 @@ pub struct NewNote {
     pub content: String,
     pub notebook: Option<String>,
     pub tags: Vec<String>,
-    pub transcript: Option<String>,
-    pub audio_path: Option<String>,
     pub conversation_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Repeat {
+    #[default]
+    None,
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+}
+
+impl Repeat {
+    pub const ALL: [Self; 5] = [Self::None, Self::Daily, Self::Weekly, Self::Monthly, Self::Yearly];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Daily => "daily",
+            Self::Weekly => "weekly",
+            Self::Monthly => "monthly",
+            Self::Yearly => "yearly",
+        }
+    }
+
+    pub fn parse(text: &str) -> Result<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|r| r.as_str() == text.trim())
+            .ok_or_else(|| anyhow::anyhow!(trf("Repetición desconocida: {value} (usa none, daily, weekly, monthly o yearly)", &[("value", &text)])))
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Reminder {
+    pub id: i64,
+    pub title: String,
+    pub body: String,
+    pub due_at: i64,
+    pub anchor_at: i64,
+    pub repeat: Repeat,
+    pub done: bool,
+    pub notified: bool,
+    pub attachments: Vec<Attachment>,
+    pub created: i64,
+    pub completed: Option<i64>,
+}
+
+#[derive(Debug, Default)]
+pub struct NewReminder {
+    pub title: String,
+    pub body: String,
+    pub due_at: i64,
+    pub repeat: Repeat,
+    pub conversation_id: Option<i64>,
+}
+
+#[derive(Debug, Default)]
+pub struct ReminderUpdate {
+    pub title: Option<String>,
+    pub body: Option<String>,
+    /// Cambia también la fecha base de las repeticiones y vuelve a avisar.
+    pub due_at: Option<i64>,
+    pub repeat: Option<Repeat>,
 }
 
 #[derive(Debug, Default)]
@@ -280,7 +443,8 @@ pub struct MessageRecord {
     pub tool_input: Option<String>,
     pub tool_output: Option<String>,
     pub is_error: bool,
-    pub audio_path: Option<String>,
+    /// Solo al leer del historial; para guardarlos, `Store::add_attachment`.
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -323,7 +487,7 @@ impl MessageRecord {
             tool_input: None,
             tool_output: None,
             is_error: false,
-            audio_path: None,
+            attachments: Vec::new(),
         }
     }
 }
@@ -429,9 +593,9 @@ impl Store {
         };
         let ts = now();
         tx.execute(
-            "INSERT INTO notes (notebook_id, title, content, transcript, audio_path, conversation_id, created, modified)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
-            params![notebook_id, title, note.content, note.transcript, note.audio_path, note.conversation_id, ts],
+            "INSERT INTO notes (notebook_id, title, content, conversation_id, created, modified)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+            params![notebook_id, title, note.content, note.conversation_id, ts],
         )?;
         let id = tx.last_insert_rowid();
         Self::set_tags(&tx, id, &note.tags)?;
@@ -443,28 +607,29 @@ impl Store {
         let conn = self.conn();
         let note = conn
             .query_row(
-                "SELECT n.id, n.title, n.content, nb.name, n.transcript, n.audio_path, n.created, n.modified
+                "SELECT n.id, n.title, n.content, nb.name, n.created, n.modified
                  FROM notes n LEFT JOIN notebooks nb ON nb.id = n.notebook_id WHERE n.id = ?1",
                 [id],
                 |r| {
-                    let audio_path: Option<String> = r.get(5)?;
                     Ok(Note {
                         id: r.get(0)?,
                         title: r.get(1)?,
                         content: r.get(2)?,
                         notebook: r.get(3)?,
                         tags: Vec::new(),
-                        transcript: r.get(4)?,
-                        has_audio: audio_path.is_some(),
-                        audio_path,
-                        created: r.get(6)?,
-                        modified: r.get(7)?,
+                        attachments: Vec::new(),
+                        created: r.get(4)?,
+                        modified: r.get(5)?,
                     })
                 },
             )
             .optional()?
             .with_context(|| missing(Kind::Note, id))?;
-        Ok(Note { tags: Self::note_tags(&conn, id)?, ..note })
+        Ok(Note {
+            tags: Self::note_tags(&conn, id)?,
+            attachments: Self::attachments_of(&conn, Owner::Note(id))?,
+            ..note
+        })
     }
 
     pub fn update_note(&self, id: i64, update: NoteUpdate) -> Result<()> {
@@ -502,22 +667,22 @@ impl Store {
         Ok(())
     }
 
-    /// Borra la nota y devuelve la ruta de su audio, si tenía.
-    pub fn delete_note(&self, id: i64) -> Result<Option<String>> {
+    /// Borra la nota. Sus archivos los recoge después la limpieza de huérfanos.
+    pub fn delete_note(&self, id: i64) -> Result<()> {
         let conn = self.conn();
-        let audio: Option<Option<String>> = conn
-            .query_row("SELECT audio_path FROM notes WHERE id = ?1", [id], |r| r.get(0))
-            .optional()?;
-        let Some(audio) = audio else { bail!(missing(Kind::Note, id)) };
-        conn.execute("DELETE FROM notes WHERE id = ?1", [id])?;
+        let changed = conn.execute("DELETE FROM notes WHERE id = ?1", [id])?;
+        expect_changed(changed, Kind::Note, id)?;
         conn.execute("DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM note_tags)", [])?;
-        Ok(audio)
+        Ok(())
     }
 
     pub fn search_notes(&self, filter: &NoteFilter) -> Result<Vec<NoteSummary>> {
         let conn = self.conn();
         let mut sql = String::from(
-            "SELECT n.id, n.title, nb.name, substr(n.content, 1, 160), n.audio_path IS NOT NULL, n.modified
+            "SELECT n.id, n.title, nb.name, substr(n.content, 1, 160),
+                    (SELECT count(*) FROM attachments a WHERE a.note_id = n.id AND a.kind = 'audio'),
+                    (SELECT count(*) FROM attachments a WHERE a.note_id = n.id AND a.kind = 'image'),
+                    n.modified
              FROM notes n LEFT JOIN notebooks nb ON nb.id = n.notebook_id WHERE 1",
         );
         let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -547,8 +712,9 @@ impl Store {
                 notebook: r.get(2)?,
                 tags: Vec::new(),
                 snippet: r.get(3)?,
-                has_audio: r.get(4)?,
-                modified: r.get(5)?,
+                audios: r.get(4)?,
+                images: r.get(5)?,
+                modified: r.get(6)?,
             })
         })?;
         let mut notes: Vec<NoteSummary> = rows.collect::<rusqlite::Result<_>>()?;
@@ -791,8 +957,8 @@ impl Store {
     pub fn add_message(&self, conversation_id: i64, message: &MessageRecord) -> Result<i64> {
         let conn = self.conn();
         conn.execute(
-            "INSERT INTO messages (conversation_id, kind, content, tool_name, tool_input, tool_output, is_error, audio_path, created)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO messages (conversation_id, kind, content, tool_name, tool_input, tool_output, is_error, created)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 conversation_id,
                 message.kind.as_str(),
@@ -801,7 +967,6 @@ impl Store {
                 message.tool_input,
                 message.tool_output,
                 message.is_error,
-                message.audio_path,
                 now()
             ],
         )?;
@@ -859,7 +1024,7 @@ impl Store {
     pub fn messages(&self, conversation_id: i64) -> Result<Vec<MessageRecord>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT kind, content, tool_name, tool_input, tool_output, is_error, audio_path
+            "SELECT kind, content, tool_name, tool_input, tool_output, is_error, id
              FROM messages WHERE conversation_id = ?1 ORDER BY id",
         )?;
         let rows = stmt.query_map([conversation_id], |r| {
@@ -870,10 +1035,17 @@ impl Store {
                 tool_input: r.get(3)?,
                 tool_output: r.get(4)?,
                 is_error: r.get(5)?,
-                audio_path: r.get(6)?,
+                attachments: Vec::new(),
             })
+            .map(|record| (record, r.get::<_, i64>(6)))
         })?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        let mut records = Vec::new();
+        for row in rows {
+            let (mut record, id) = row?;
+            record.attachments = Self::attachments_of(&conn, Owner::Message(id?))?;
+            records.push(record);
+        }
+        Ok(records)
     }
 
     /// Borra la conversación y sus mensajes; las notas que salieron de ella se conservan.
@@ -882,32 +1054,254 @@ impl Store {
         expect_changed(changed, Kind::Conversation, id)
     }
 
-    // ── Audio ──────────────────────────────────────────────────────────────
+    // ── Adjuntos ───────────────────────────────────────────────────────────
 
-    /// Audios enlazados a notas (estos nunca se borran automáticamente).
-    pub fn note_audio_paths(&self) -> Result<HashSet<String>> {
+    pub fn add_attachment(&self, owner: Owner, attachment: &NewAttachment) -> Result<i64> {
         let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT audio_path FROM notes WHERE audio_path IS NOT NULL")?;
+        let (column, id) = owner.column();
+        conn.execute(
+            &format!("INSERT INTO attachments (kind, path, mime, transcript, {column}, created) VALUES (?1, ?2, ?3, ?4, ?5, ?6)"),
+            params![attachment.kind.as_str(), attachment.path, attachment.mime, attachment.transcript, id, now()],
+        )?;
+        let attachment_id = conn.last_insert_rowid();
+        Self::touch_owner(&conn, owner)?;
+        Ok(attachment_id)
+    }
+
+    /// Copia adjuntos existentes (por ejemplo, los de mensajes) a otro dueño.
+    pub fn copy_attachments(&self, ids: &[i64], owner: Owner) -> Result<usize> {
+        let conn = self.conn();
+        let (column, owner_id) = owner.column();
+        let mut copied = 0;
+        for id in ids {
+            copied += conn.execute(
+                &format!(
+                    "INSERT INTO attachments (kind, path, mime, transcript, {column}, created)
+                     SELECT kind, path, mime, transcript, ?1, ?2 FROM attachments WHERE id = ?3"
+                ),
+                params![owner_id, now(), id],
+            )?;
+        }
+        Self::touch_owner(&conn, owner)?;
+        Ok(copied)
+    }
+
+    pub fn remove_attachment(&self, id: i64) -> Result<()> {
+        let conn = self.conn();
+        let owner: Option<(Option<i64>, Option<i64>)> = conn
+            .query_row("SELECT note_id, reminder_id FROM attachments WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?;
+        conn.execute("DELETE FROM attachments WHERE id = ?1", [id])?;
+        match owner {
+            Some((Some(note), _)) => Self::touch_owner(&conn, Owner::Note(note))?,
+            Some((_, Some(reminder))) => Self::touch_owner(&conn, Owner::Reminder(reminder))?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub fn attachments(&self, owner: Owner) -> Result<Vec<Attachment>> {
+        Self::attachments_of(&self.conn(), owner)
+    }
+
+    fn attachments_of(conn: &Connection, owner: Owner) -> Result<Vec<Attachment>> {
+        let (column, id) = owner.column();
+        let mut stmt = conn.prepare_cached(&format!(
+            "SELECT id, kind, path, mime, transcript, created FROM attachments WHERE {column} = ?1 ORDER BY id"
+        ))?;
+        let rows = stmt.query_map([id], attachment_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Tras cambiar adjuntos: fecha de modificación y, en notas, la transcripción
+    /// que indexa la búsqueda.
+    fn touch_owner(conn: &Connection, owner: Owner) -> Result<()> {
+        match owner {
+            Owner::Note(id) => {
+                conn.execute(
+                    "UPDATE notes SET modified = ?1, transcript = (
+                         SELECT group_concat(transcript, char(10)) FROM attachments
+                         WHERE note_id = ?2 AND kind = 'audio' AND transcript IS NOT NULL)
+                     WHERE id = ?2",
+                    params![now(), id],
+                )?;
+            }
+            Owner::Reminder(_) | Owner::Message(_) => {}
+        }
+        Ok(())
+    }
+
+    /// Adjuntos de los mensajes del usuario de una conversación, en orden.
+    pub fn conversation_attachments(&self, conversation_id: i64) -> Result<Vec<ConversationAttachment>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT a.id, a.kind, a.path, a.mime, a.transcript, a.created, m.id, m.content
+             FROM attachments a JOIN messages m ON m.id = a.message_id
+             WHERE m.conversation_id = ?1 ORDER BY a.id",
+        )?;
+        let rows = stmt.query_map([conversation_id], |r| {
+            Ok(ConversationAttachment { attachment: attachment_from_row(r)?, message_id: r.get(6)?, message: r.get(7)? })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Archivos que usa alguna nota o recordatorio (no se borran nunca solos).
+    pub fn kept_attachment_paths(&self) -> Result<HashSet<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT path FROM attachments WHERE note_id IS NOT NULL OR reminder_id IS NOT NULL")?;
         let rows = stmt.query_map([], |r| r.get(0))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Audios enlazados a cualquier cosa (notas o mensajes del historial).
-    pub fn referenced_audio_paths(&self) -> Result<HashSet<String>> {
-        let mut paths = self.note_audio_paths()?;
+    /// Todos los archivos con alguna fila que los use.
+    pub fn attachment_paths(&self) -> Result<HashSet<String>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT audio_path FROM messages WHERE audio_path IS NOT NULL")?;
-        for path in stmt.query_map([], |r| r.get(0))? {
-            paths.insert(path?);
-        }
-        Ok(paths)
+        let mut stmt = conn.prepare("SELECT path FROM attachments")?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Quita del historial la referencia a un audio que se ha borrado.
-    pub fn forget_message_audio(&self, path: &str) -> Result<()> {
-        self.conn().execute("UPDATE messages SET audio_path = NULL WHERE audio_path = ?1", [path])?;
+    /// Quita del historial un archivo que se va a borrar.
+    pub fn forget_message_file(&self, path: &str) -> Result<()> {
+        self.conn().execute("DELETE FROM attachments WHERE path = ?1 AND message_id IS NOT NULL", [path])?;
         Ok(())
     }
+
+    // ── Recordatorios ──────────────────────────────────────────────────────
+
+    pub fn create_reminder(&self, reminder: NewReminder) -> Result<i64> {
+        let title = non_empty(&reminder.title, &tr("El recordatorio necesita un título"))?;
+        let conn = self.conn();
+        conn.execute(
+            "INSERT INTO reminders (title, body, due_at, anchor_at, repeat, conversation_id, created)
+             VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6)",
+            params![title, reminder.body, reminder.due_at, reminder.repeat.as_str(), reminder.conversation_id, now()],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn get_reminder(&self, id: i64) -> Result<Reminder> {
+        let conn = self.conn();
+        let reminder = conn
+            .query_row(&format!("{REMINDER_SELECT} WHERE id = ?1"), [id], reminder_from_row)
+            .optional()?
+            .with_context(|| missing(Kind::Reminder, id))?;
+        Ok(Reminder { attachments: Self::attachments_of(&conn, Owner::Reminder(id))?, ..reminder })
+    }
+
+    pub fn update_reminder(&self, id: i64, update: ReminderUpdate) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let exists: bool = tx.query_row("SELECT count(*) FROM reminders WHERE id = ?1", [id], |r| r.get::<_, i64>(0))? > 0;
+        if !exists {
+            bail!(missing(Kind::Reminder, id));
+        }
+        if let Some(title) = update.title {
+            tx.execute("UPDATE reminders SET title = ?1 WHERE id = ?2", params![non_empty(&title, &tr("El título no puede estar vacío"))?, id])?;
+        }
+        if let Some(body) = update.body {
+            tx.execute("UPDATE reminders SET body = ?1 WHERE id = ?2", params![body, id])?;
+        }
+        if let Some(due_at) = update.due_at {
+            tx.execute(
+                "UPDATE reminders SET due_at = ?1, anchor_at = ?1, notified = 0, done = 0, completed = NULL WHERE id = ?2",
+                params![due_at, id],
+            )?;
+        }
+        if let Some(repeat) = update.repeat {
+            tx.execute("UPDATE reminders SET repeat = ?1 WHERE id = ?2", params![repeat.as_str(), id])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Hecho: si se repite, pasa a la siguiente fecha; si no, a «Completados».
+    pub fn complete_reminder(&self, id: i64) -> Result<Reminder> {
+        let reminder = self.get_reminder(id)?;
+        let conn = self.conn();
+        match crate::reminders::next_occurrence(reminder.anchor_at, reminder.repeat, now()) {
+            Some(next) => conn.execute("UPDATE reminders SET due_at = ?1, notified = 0 WHERE id = ?2", params![next, id])?,
+            None => conn.execute("UPDATE reminders SET done = 1, completed = ?1 WHERE id = ?2", params![now(), id])?,
+        };
+        drop(conn);
+        self.get_reminder(id)
+    }
+
+    pub fn reopen_reminder(&self, id: i64) -> Result<()> {
+        let changed = self.conn().execute("UPDATE reminders SET done = 0, completed = NULL WHERE id = ?1", [id])?;
+        expect_changed(changed, Kind::Reminder, id)
+    }
+
+    /// Vuelve a avisar en `until` sin cambiar la base de las repeticiones.
+    pub fn snooze_reminder(&self, id: i64, until: i64) -> Result<()> {
+        let changed = self
+            .conn()
+            .execute("UPDATE reminders SET due_at = ?1, notified = 0, done = 0 WHERE id = ?2", params![until, id])?;
+        expect_changed(changed, Kind::Reminder, id)
+    }
+
+    pub fn mark_reminder_notified(&self, id: i64) -> Result<()> {
+        self.conn().execute("UPDATE reminders SET notified = 1 WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn delete_reminder(&self, id: i64) -> Result<()> {
+        let changed = self.conn().execute("DELETE FROM reminders WHERE id = ?1", [id])?;
+        expect_changed(changed, Kind::Reminder, id)
+    }
+
+    /// Pendientes (por fecha) o completados (los últimos primero), con sus adjuntos.
+    pub fn list_reminders(&self, done: bool) -> Result<Vec<Reminder>> {
+        let conn = self.conn();
+        let order = if done { "completed DESC" } else { "due_at" };
+        let mut stmt = conn.prepare(&format!("{REMINDER_SELECT} WHERE done = ?1 ORDER BY {order}"))?;
+        let rows = stmt.query_map([done], reminder_from_row)?;
+        let mut reminders: Vec<Reminder> = rows.collect::<rusqlite::Result<_>>()?;
+        for reminder in &mut reminders {
+            reminder.attachments = Self::attachments_of(&conn, Owner::Reminder(reminder.id))?;
+        }
+        Ok(reminders)
+    }
+
+    /// Recordatorios cuyo aviso ha llegado y aún no se ha mostrado.
+    pub fn reminders_due(&self, now: i64) -> Result<Vec<Reminder>> {
+        let ids: Vec<i64> = {
+            let conn = self.conn();
+            let mut stmt = conn.prepare("SELECT id FROM reminders WHERE done = 0 AND notified = 0 AND due_at <= ?1")?;
+            let rows = stmt.query_map([now], |r| r.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        ids.into_iter().map(|id| self.get_reminder(id)).collect()
+    }
+}
+
+const REMINDER_SELECT: &str = "SELECT id, title, body, due_at, anchor_at, repeat, done, notified, created, completed FROM reminders";
+
+fn reminder_from_row(r: &Row) -> rusqlite::Result<Reminder> {
+    Ok(Reminder {
+        id: r.get(0)?,
+        title: r.get(1)?,
+        body: r.get(2)?,
+        due_at: r.get(3)?,
+        anchor_at: r.get(4)?,
+        repeat: Repeat::parse(&r.get::<_, String>(5)?).unwrap_or_default(),
+        done: r.get(6)?,
+        notified: r.get(7)?,
+        attachments: Vec::new(),
+        created: r.get(8)?,
+        completed: r.get(9)?,
+    })
+}
+
+fn attachment_from_row(r: &Row) -> rusqlite::Result<Attachment> {
+    Ok(Attachment {
+        id: r.get(0)?,
+        kind: AttachmentKind::parse(&r.get::<_, String>(1)?),
+        path: r.get(2)?,
+        mime: r.get(3)?,
+        transcript: r.get(4)?,
+        created: r.get(5)?,
+    })
 }
 
 const TODO_SELECT: &str = "SELECT t.id, t.list_id, l.name, t.text, t.done, t.due, t.priority, t.reminder_at,
@@ -943,6 +1337,7 @@ enum Kind {
     List,
     Todo,
     Conversation,
+    Reminder,
 }
 
 fn missing(kind: Kind, id: i64) -> String {
@@ -952,6 +1347,7 @@ fn missing(kind: Kind, id: i64) -> String {
         Kind::List => tr("No existe la lista {id}"),
         Kind::Todo => tr("No existe la tarea {id}"),
         Kind::Conversation => tr("No existe la conversación {id}"),
+        Kind::Reminder => tr("No existe el recordatorio {id}"),
     };
     message.replace("{id}", &id.to_string())
 }

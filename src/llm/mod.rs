@@ -16,6 +16,7 @@ use serde_json::Value;
 
 use crate::config::{LlmConfig, LlmProvider};
 use crate::i18n::{tr, trf};
+use crate::attachments::ModelImage;
 
 /// Definición de una tool en formato neutro (JSON Schema).
 #[derive(Debug, Clone)]
@@ -82,6 +83,7 @@ pub struct Client {
     pub reasoning: String,
     pub base_url: String,
     pub api_key: String,
+    pub vision: bool,
     http: reqwest::Client,
 }
 
@@ -109,12 +111,48 @@ impl Client {
             reasoning: settings.reasoning.trim().to_string(),
             base_url: settings.base_url.trim().trim_end_matches('/').to_string(),
             api_key,
+            vision: settings.vision,
             http: http_client()?,
         })
     }
 
-    pub fn user_message(&self, text: &str) -> Value {
-        serde_json::json!({ "role": "user", "content": text })
+    /// Mensaje del usuario con sus imágenes, en el formato de cada API.
+    pub fn user_message(&self, text: &str, images: &[ModelImage]) -> Value {
+        use serde_json::json;
+        if images.is_empty() {
+            return json!({ "role": "user", "content": text });
+        }
+        if !self.vision {
+            let note = trf(
+                "[El usuario ha adjuntado {count} imágenes, pero este modelo no puede verlas.]",
+                &[("count", &images.len())],
+            );
+            return json!({ "role": "user", "content": format!("{text}\n\n{note}") });
+        }
+        let data_url = |image: &ModelImage| format!("data:{};base64,{}", image.mime, image.base64);
+        match self.provider {
+            LlmProvider::Anthropic => {
+                let mut content: Vec<Value> = images
+                    .iter()
+                    .map(|i| json!({ "type": "image", "source": { "type": "base64", "media_type": i.mime, "data": i.base64 } }))
+                    .collect();
+                content.push(json!({ "type": "text", "text": text }));
+                json!({ "role": "user", "content": content })
+            }
+            LlmProvider::Openai => {
+                let mut content = vec![json!({ "type": "input_text", "text": text })];
+                content.extend(images.iter().map(|i| json!({ "type": "input_image", "image_url": data_url(i) })));
+                json!({ "role": "user", "content": content })
+            }
+            LlmProvider::OpenaiCompatible => {
+                let mut content = vec![json!({ "type": "text", "text": text })];
+                content.extend(images.iter().map(|i| json!({ "type": "image_url", "image_url": { "url": data_url(i) } })));
+                json!({ "role": "user", "content": content })
+            }
+            LlmProvider::Ollama => {
+                json!({ "role": "user", "content": text, "images": images.iter().map(|i| i.base64.clone()).collect::<Vec<_>>() })
+            }
+        }
     }
 
     async fn complete(&self, system: &str, messages: &[Value], tools: &[ToolSpec]) -> Result<Turn> {
@@ -295,6 +333,7 @@ mod tests {
             reasoning: "default".into(),
             base_url,
             api_key: "k".into(),
+            vision: true,
             http: http_client().unwrap(),
         }
     }
@@ -315,7 +354,7 @@ mod tests {
         let second = json!({ "stop_reason": "end_turn", "content": [{"type": "text", "text": "Añadido."}] });
         let (url, received) = mock_server(vec![first.clone(), second]).await;
         let client = client(LlmProvider::Anthropic, url);
-        let mut messages = vec![client.user_message("apunta pan")];
+        let mut messages = vec![client.user_message("apunta pan", &[])];
         let mut display = Vec::new();
         run_agent(&client, "sys", &mut messages, &tool(), &Echo, &mut display).await.unwrap();
 
@@ -339,7 +378,7 @@ mod tests {
         let second = json!({ "choices": [{ "message": { "role": "assistant", "content": "Añadido." }}]});
         let (url, received) = mock_server(vec![first, second]).await;
         let client = client(LlmProvider::OpenaiCompatible, url);
-        let mut messages = vec![client.user_message("apunta pan")];
+        let mut messages = vec![client.user_message("apunta pan", &[])];
         let mut display = Vec::new();
         run_agent(&client, "sys", &mut messages, &tool(), &Echo, &mut display).await.unwrap();
 
@@ -362,7 +401,7 @@ mod tests {
         let (url, received) = mock_server(vec![first, second]).await;
         let mut client = client(LlmProvider::Openai, url);
         client.reasoning = "low".into();
-        let mut messages = vec![client.user_message("apunta pan")];
+        let mut messages = vec![client.user_message("apunta pan", &[])];
         let mut display = Vec::new();
         run_agent(&client, "sys", &mut messages, &tool(), &Echo, &mut display).await.unwrap();
 
@@ -377,5 +416,23 @@ mod tests {
         assert_eq!(requests[1]["input"][2], call);
         assert_eq!(requests[1]["input"][3], json!({"type": "function_call_output", "call_id": "call_1", "output": "{\"ok\":\"pan\"}"}));
         assert!(matches!(&display[..], [DisplayItem::Reasoning(r), DisplayItem::Tool(_), DisplayItem::Text(t)] if r == "pensando" && t == "Añadido."));
+    }
+
+    #[test]
+    fn user_messages_with_images() {
+        let image = ModelImage { mime: "image/jpeg".into(), base64: "QUJD".into() };
+        let images = [image];
+        let message = |provider, vision| {
+            let mut c = client(provider, String::new());
+            c.vision = vision;
+            c.user_message("mira", &images)
+        };
+        assert_eq!(message(LlmProvider::Anthropic, true)["content"][0]["source"]["data"], "QUJD");
+        assert_eq!(message(LlmProvider::Anthropic, true)["content"][1]["text"], "mira");
+        assert_eq!(message(LlmProvider::Openai, true)["content"][1]["image_url"], "data:image/jpeg;base64,QUJD");
+        assert_eq!(message(LlmProvider::OpenaiCompatible, true)["content"][1]["image_url"]["url"], "data:image/jpeg;base64,QUJD");
+        assert_eq!(message(LlmProvider::Ollama, true)["images"][0], "QUJD");
+        let blind = message(LlmProvider::Ollama, false);
+        assert!(blind["content"].as_str().unwrap().starts_with("mira\n\n[") && blind.get("images").is_none());
     }
 }

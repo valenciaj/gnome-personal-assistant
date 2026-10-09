@@ -8,8 +8,9 @@ use gtk::{gio, glib};
 use sourceview5::prelude::*;
 
 use super::{Ctx, clear_list, local_time, placeholder, select_by_name, sidebar, split, text_row, toolbar_box};
+use crate::attachment_view::{AddOptions, add_button, attachments_widget};
 use crate::conversation_view::markdown_label;
-use crate::store::{NewNote, NoteFilter, NoteUpdate};
+use crate::store::{Attachment, NewAttachment, NewNote, NoteFilter, NoteUpdate, Owner};
 use crate::i18n::{n_, tr, trf};
 
 const ALL_NOTEBOOKS: &str = n_("Todos los cuadernos");
@@ -43,11 +44,14 @@ pub struct Page {
     edit_notebook: gtk::Entry,
     edit_tags: gtk::Entry,
     edit_buffer: sourceview5::Buffer,
+    edit_attachments: gtk::Box,
+    /// Adjuntos de una nota nueva, que se guardan al crearla.
+    edit_pending: RefCell<Vec<NewAttachment>>,
+    /// Adjuntos que muestra la vista, para no recrear (y cortar) el audio si no cambian.
+    shown_attachments: RefCell<(i64, Vec<i64>)>,
     mode: Cell<Mode>,
     refreshing: Cell<bool>,
     actions: gio::SimpleActionGroup,
-    /// Reproductor de la nota abierta, para pararlo al cambiar de nota.
-    media: RefCell<Option<gtk::MediaFile>>,
 }
 
 impl Page {
@@ -155,9 +159,14 @@ impl Page {
             .margin_start(12)
             .margin_end(12)
             .build();
+        let edit_attachments = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
+        let attachments_row = gtk::Box::builder().spacing(6).build();
+        attachments_row.append(&gtk::Label::builder().label(tr("Adjuntos")).css_classes(["heading"]).hexpand(true).xalign(0.0).build());
         edit_content.append(&edit_title);
         edit_content.append(&meta_row);
         edit_content.append(&editor_scroller);
+        edit_content.append(&attachments_row);
+        edit_content.append(&edit_attachments);
         let edit_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
         edit_page.append(&edit_header);
         edit_page.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
@@ -192,12 +201,26 @@ impl Page {
             edit_notebook,
             edit_tags,
             edit_buffer,
+            edit_attachments,
+            edit_pending: RefCell::default(),
+            shown_attachments: RefCell::new((0, Vec::new())),
             mode: Cell::new(Mode::Empty),
             refreshing: Cell::new(false),
             actions,
-            media: RefCell::new(None),
         });
         this.connect(&new_note, &edit, &delete, &cancel, &save);
+        let weak = Rc::downgrade(&this);
+        let toast = this.ctx.clone();
+        attachments_row.append(&add_button(
+            AddOptions::ImagesAndAudio,
+            this.ctx.stt.clone(),
+            Rc::new(move |attachment| {
+                if let Some(page) = weak.upgrade() {
+                    page.add_attachment(attachment);
+                }
+            }),
+            Rc::new(move |message| toast.toast(&message)),
+        ));
         this
     }
 
@@ -344,8 +367,11 @@ impl Page {
             let mut meta = vec![local_time(note.modified)];
             meta.extend(note.notebook.clone());
             meta.extend(note.tags.iter().map(|t| format!("#{t}")));
-            if note.has_audio {
-                meta.push("🎤".into());
+            if note.audios > 0 {
+                meta.push(format!("🎤{}", note.audios));
+            }
+            if note.images > 0 {
+                meta.push(format!("🖼{}", note.images));
             }
             let row = text_row(&note.title, &format!("{}\n{}", plain_snippet(&note.snippet), meta.join(" · ")));
             row.set_widget_name(&note.id.to_string());
@@ -363,7 +389,7 @@ impl Page {
 
     fn set_mode(&self, mode: Mode) {
         if !matches!(mode, Mode::View(_)) {
-            self.stop_media();
+            self.clear_view_attachments();
         }
         self.mode.set(mode);
         self.detail.set_visible_child_name(match mode {
@@ -376,10 +402,12 @@ impl Page {
         }
     }
 
-    fn stop_media(&self) {
-        if let Some(media) = self.media.borrow_mut().take() {
-            media.pause();
+    /// Quita la galería de la vista (y con ella, para el audio que suene).
+    fn clear_view_attachments(&self) {
+        while let Some(child) = self.view_extra.first_child() {
+            self.view_extra.remove(&child);
         }
+        *self.shown_attachments.borrow_mut() = (0, Vec::new());
     }
 
     fn show(&self, id: i64) {
@@ -387,9 +415,6 @@ impl Page {
             self.set_mode(Mode::Empty);
             return;
         };
-        if self.mode.get() != Mode::View(id) {
-            self.stop_media();
-        }
         self.view_title.set_text(&note.title);
         let mut meta = Vec::new();
         meta.extend(note.notebook.clone().map(|n| format!("📓 {n}")));
@@ -402,22 +427,14 @@ impl Page {
         }
         self.view_meta.set_text(&meta.join(" · "));
 
-        // El audio solo se recrea al cambiar de nota, para no cortar la reproducción.
-        if self.mode.get() != Mode::View(id) || self.view_extra.first_child().is_none() {
-            while let Some(child) = self.view_extra.first_child() {
-                self.view_extra.remove(&child);
+        // Los adjuntos solo se recrean si cambian, para no cortar un audio que suene.
+        let shown = (id, note.attachments.iter().map(|a| a.id).collect::<Vec<_>>());
+        if *self.shown_attachments.borrow() != shown {
+            self.clear_view_attachments();
+            if !note.attachments.is_empty() {
+                self.view_extra.append(&attachments_widget(&note.attachments, None));
             }
-            if let Some(path) = note.audio_path.as_deref().filter(|p| std::path::Path::new(p).exists()) {
-                let media = gtk::MediaFile::for_filename(path);
-                self.view_extra.append(&gtk::MediaControls::new(Some(&media)));
-                *self.media.borrow_mut() = Some(media);
-            }
-            if let Some(transcript) = &note.transcript {
-                let label = crate::conversation_view::wrapped_label();
-                label.set_text(transcript);
-                label.add_css_class("dim-label");
-                self.view_extra.append(&gtk::Expander::builder().label(tr("Transcripción original")).child(&label).build());
-            }
+            *self.shown_attachments.borrow_mut() = shown;
         }
 
         while let Some(child) = self.view_body.first_child() {
@@ -430,13 +447,13 @@ impl Page {
         self.set_mode(Mode::View(id));
     }
 
-    pub fn edit_selected(&self) {
+    pub fn edit_selected(self: &Rc<Self>) {
         if let Mode::View(id) = self.mode.get() {
             self.start_editing(Some(id));
         }
     }
 
-    fn start_editing(&self, id: Option<i64>) {
+    fn start_editing(self: &Rc<Self>, id: Option<i64>) {
         match id {
             Some(id) => {
                 let Some(note) = self.ctx.check(self.ctx.store.get_note(id)) else { return };
@@ -455,7 +472,9 @@ impl Page {
                 self.edit_buffer.set_text("");
             }
         }
+        self.edit_pending.borrow_mut().clear();
         self.set_mode(Mode::Edit(id));
+        self.show_edit_attachments();
         self.edit_title.grab_focus();
     }
 
@@ -486,6 +505,12 @@ impl Page {
                 notebook: (!notebook.is_empty()).then_some(notebook),
                 tags,
                 ..Default::default()
+            })
+            .and_then(|id| {
+                for attachment in self.edit_pending.take() {
+                    store.add_attachment(Owner::Note(id), &attachment)?;
+                }
+                Ok(id)
             }),
         };
         if let Some(id) = self.ctx.check(saved) {
@@ -505,20 +530,60 @@ impl Page {
             &tr("La nota y su grabación se borrarán definitivamente."),
             &tr("Borrar"),
             move || {
-                this.stop_media();
-                let store = &this.ctx.store;
-                if let Some(audio) = this.ctx.check(store.delete_note(id)) {
-                    if let Some(audio) = audio
-                        && !store.referenced_audio_paths().unwrap_or_default().contains(&audio)
-                    {
-                        let _ = std::fs::remove_file(audio);
-                    }
+                if this.ctx.check(this.ctx.store.delete_note(id)).is_some() {
                     this.set_mode(Mode::Empty);
                     this.refresh();
                     this.ctx.toast(&tr("Nota borrada"));
                 }
             },
         );
+    }
+
+    /// Adjunto nuevo desde el menú: a la nota si ya existe; si es nueva, al guardarla.
+    fn add_attachment(self: &Rc<Self>, attachment: NewAttachment) {
+        match self.mode.get() {
+            Mode::Edit(Some(id)) => {
+                self.ctx.check(self.ctx.store.add_attachment(Owner::Note(id), &attachment));
+            }
+            Mode::Edit(None) => self.edit_pending.borrow_mut().push(attachment),
+            _ => return,
+        }
+        self.show_edit_attachments();
+    }
+
+    /// Adjuntos editables. Los pendientes de una nota nueva llevan ids negativos.
+    fn show_edit_attachments(self: &Rc<Self>) {
+        while let Some(child) = self.edit_attachments.first_child() {
+            self.edit_attachments.remove(&child);
+        }
+        let mut attachments = match self.mode.get() {
+            Mode::Edit(Some(id)) => self.ctx.check(self.ctx.store.attachments(Owner::Note(id))).unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        attachments.extend(self.edit_pending.borrow().iter().enumerate().map(|(i, a)| Attachment {
+            id: -(i as i64) - 1,
+            kind: a.kind,
+            path: a.path.clone(),
+            mime: a.mime.clone(),
+            transcript: a.transcript.clone(),
+            created: 0,
+        }));
+        let weak = Rc::downgrade(self);
+        let remove = Rc::new(move |id: i64| {
+            let Some(page) = weak.upgrade() else { return };
+            if id < 0 {
+                let index = (-id - 1) as usize;
+                if index < page.edit_pending.borrow().len() {
+                    page.edit_pending.borrow_mut().remove(index);
+                }
+            } else {
+                page.ctx.check(page.ctx.store.remove_attachment(id));
+            }
+            // Fuera del manejador: el botón pulsado se destruye al redibujar.
+            let page = page.clone();
+            glib::idle_add_local_once(move || page.show_edit_attachments());
+        });
+        self.edit_attachments.append(&attachments_widget(&attachments, Some(remove)));
     }
 
     fn selected_notebook_id(&self) -> Option<(i64, String)> {
