@@ -92,3 +92,7 @@ sistema distinto del español (o se fuerza en Preferencias). Tras cambiar textos
 ```
 
 El catálogo se compila en `build.rs` y va incrustado en el binario.
+
+## Licencia
+
+MIT. Ver [LICENSE](LICENSE).

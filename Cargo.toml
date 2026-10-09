@@ -5,6 +5,8 @@ edition = "2024"
 description = "Voice assistant for GNOME with notes and task lists"
 authors = ["Javier Valencia <javier.valencia@voiper.es>"]
 readme = "README.md"
+license = "MIT"
+repository = "https://github.com/valenciaj/gnome-personal-assistant"
 
 [dependencies]
 adw = { version = "0.9.2", package = "libadwaita", features = ["v1_8"] }
