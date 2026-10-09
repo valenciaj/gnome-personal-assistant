@@ -4,6 +4,15 @@ Asistente por voz en Rust (GTK4 + libadwaita). Ver [SPEC.md](SPEC.md).
 
 ## Instalación
 
+Solo para tu usuario, sin sudo (binario en `~/.local/bin`):
+
+```sh
+./scripts/install-local.sh               # compila en release e instala
+./scripts/install-local.sh --uninstall   # lo quita (conserva datos y configuración)
+```
+
+Como paquete del sistema:
+
 ```sh
 cargo install cargo-deb   # una vez
 cargo deb                 # genera target/debian/gnome-personal-assistant_*.deb
