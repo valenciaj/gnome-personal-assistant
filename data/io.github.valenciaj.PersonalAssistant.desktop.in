@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Asistente personal
+Comment=Asistente por voz con notas y listas de tareas
+Exec=@BIN@
+Icon=audio-input-microphone
+Terminal=false
+Categories=Utility;
+StartupNotify=true
+X-GNOME-UsesNotifications=true
