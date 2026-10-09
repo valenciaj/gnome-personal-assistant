@@ -82,7 +82,7 @@ impl ksni::Tray for AppTray {
             item("Última conversación", "user-available-symbolic", Command::Reopen),
             item("Notas, tareas e historial…", "view-list-bullet-symbolic", Command::ShowExplorer),
             ksni::MenuItem::Separator,
-            item("Configurar atajos…", "preferences-desktop-keyboard-shortcuts-symbolic", Command::ConfigureShortcuts),
+            item("Preferencias…", "preferences-system-symbolic", Command::ShowPreferences),
             item("Salir", "application-exit-symbolic", Command::Quit),
         ]
     }

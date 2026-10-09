@@ -4,10 +4,13 @@ mod config;
 mod dev;
 mod conversation_view;
 mod explorer;
+mod indicator;
 mod llm;
 mod markdown;
 mod popup;
+mod preferences;
 mod runtime;
+mod secrets;
 mod shortcuts;
 mod store;
 mod stt;
@@ -32,6 +35,7 @@ Si ya está en marcha, las órdenes se envían a esa instancia:
   new       Abrir el popup para escribir
   reopen    Mostrar la última conversación
   explorer  Abrir la ventana de notas, tareas e historial
+  preferences  Abrir las preferencias
   open ID   Abrir una conversación del historial para seguirla
   quit      Cerrar el asistente
   history   Listar las conversaciones guardadas
@@ -95,6 +99,7 @@ fn main() -> glib::ExitCode {
             Some("new") => Some(Command::NewTextConversation),
             Some("reopen") => Some(Command::Reopen),
             Some("explorer") => Some(Command::ShowExplorer),
+            Some("preferences") => Some(Command::ShowPreferences),
             Some("quit") => Some(Command::Quit),
             Some("open") => match args.get(2).and_then(|id| id.to_str()?.parse().ok()) {
                 Some(id) => Some(Command::OpenConversation(id)),
@@ -123,6 +128,7 @@ fn add_actions(app: &adw::Application, sender: &async_channel::Sender<Command>) 
         ("new", Command::NewTextConversation),
         ("reopen", Command::Reopen),
         ("explorer", Command::ShowExplorer),
+        ("preferences", Command::ShowPreferences),
         ("quit", Command::Quit),
     ];
     for (name, command) in actions {
@@ -149,6 +155,9 @@ fn load_css() {
 
 fn list_models() -> glib::ExitCode {
     let result = config::Config::load().and_then(|config| {
+        if let Err(err) = runtime::runtime().block_on(secrets::load()) {
+            eprintln!("Llavero: {err:#}");
+        }
         let client = llm::Client::from_config(&config.llm)?;
         println!("{} (modelo actual: {})", client.provider.label(), client.model);
         runtime::runtime().block_on(client.list_models())

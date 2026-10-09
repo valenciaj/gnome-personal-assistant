@@ -16,6 +16,7 @@ gst = { version = "0.25.4", package = "gstreamer" }
 gtk = { version = "0.11.5", package = "gtk4", features = ["gnome_49"] }
 ksni = "0.3.6"
 log = "0.4.34"
+oo7 = { version = "0.6", default-features = false, features = ["tokio", "native_crypto"] }
 pulldown-cmark = { version = "0.13.4", default-features = false }
 reqwest = { version = "0.13.5", features = ["json", "multipart"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }

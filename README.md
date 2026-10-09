@@ -18,11 +18,13 @@ sudo apt install build-essential pkg-config libgtk-4-dev libadwaita-1-dev \
 La primera vez GNOME pide confirmar los atajos globales
 (por defecto **Super+Alt+Espacio** para grabar y **Super+Alt+R** para reabrir).
 
-## Configuración (provisional, hasta la fase 4)
+## Configuración
 
-`~/.config/personal-assistant/config.toml` se crea al primer arranque y se relee
-en cada interacción. Las API keys pueden ir en el archivo o en las variables
-`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` y `OPENAI_COMPATIBLE_API_KEY`.
+Desde **Preferencias** (menú del icono o botón del explorador). Se guarda en
+`~/.config/personal-assistant/config.toml`, que también se puede editar a mano y se
+relee en cada interacción. Las API keys se guardan en el llavero de GNOME; si se
+escriben en config.toml, al arrancar se mueven al llavero. También se aceptan las
+variables `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` y `OPENAI_COMPATIBLE_API_KEY`.
 
 ```sh
 gnome-personal-assistant models   # modelos disponibles del proveedor activo
@@ -44,7 +46,11 @@ y `delete_after_days` para el historial (los de notas no se borran nunca).
 
 ```sh
 ASSISTANT_DEV=1 cargo run                    # instancia aparte, sin bandeja ni atajos
-ASSISTANT_SNAPSHOT=/tmp/shots cargo run      # capturas PNG del explorador y el popup
+ASSISTANT_SNAPSHOT=/tmp/shots cargo run      # capturas PNG de todas las ventanas
+
+# Capturas sin abrir ventanas en el escritorio:
+gtk4-broadwayd :7 &
+GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 ASSISTANT_SNAPSHOT=/tmp/shots cargo run
 ```
 
 Combínalos con `XDG_DATA_HOME`/`XDG_CONFIG_HOME` para usar datos de prueba.

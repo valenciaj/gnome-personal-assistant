@@ -97,7 +97,7 @@ impl Explorer {
 
         let conversations = conversations::Page::new(ctx.clone());
         let notes = notes::Page::new(ctx.clone());
-        let todos = todos::Page::new(ctx);
+        let todos = todos::Page::new(ctx.clone());
 
         let stack = adw::ViewStack::new();
         stack.add_titled_with_icon(notes.widget(), Some("notes"), "Notas", "accessories-text-editor-symbolic");
@@ -111,6 +111,12 @@ impl Explorer {
 
         let switcher = adw::ViewSwitcher::builder().stack(&stack).policy(adw::ViewSwitcherPolicy::Wide).build();
         let header = adw::HeaderBar::builder().title_widget(&switcher).build();
+        let preferences = gtk::Button::builder().icon_name("preferences-system-symbolic").tooltip_text("Preferencias").build();
+        let commands = ctx.commands.clone();
+        preferences.connect_clicked(move |_| {
+            let _ = commands.try_send(Command::ShowPreferences);
+        });
+        header.pack_end(&preferences);
 
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);

@@ -26,7 +26,7 @@ pub fn save_png(window: &impl IsA<gtk::Widget>, path: &Path) -> anyhow::Result<(
     let paintable = gtk::WidgetPaintable::new(Some(widget));
     let snapshot = gtk::Snapshot::new();
     paintable.snapshot(&snapshot, f64::from(width), f64::from(height));
-    let node = snapshot.to_node().ok_or_else(|| anyhow::anyhow!("ventana vacía"))?;
+    let node = snapshot.to_node().ok_or_else(|| anyhow::anyhow!("ventana vacía ({width}×{height}, visible: {})", widget.is_visible()))?;
     let renderer = widget
         .native()
         .and_then(|n| n.renderer())

@@ -14,9 +14,10 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 use serde_json::Value;
 
-use crate::audio::Recorder;
+use crate::audio::{self, Recorder, Sound};
 use crate::config::{self, AudioRetention, Config, LlmProvider, RecordingMode};
 use crate::explorer::Explorer;
+use crate::indicator::Indicator;
 use crate::llm::{self, DisplayItem};
 use crate::popup::Popup;
 use crate::runtime::runtime;
@@ -43,6 +44,12 @@ pub enum Command {
     ConfigureShortcuts,
     /// El detector de silencio ha decidido parar.
     AutoStop,
+    /// Ventanita de grabación: parar y enviar, o descartar.
+    StopRecording,
+    CancelRecording,
+    ShowPreferences,
+    /// Se ha guardado la configuración desde las preferencias.
+    ConfigChanged,
     RecordingFailed(String),
     /// Una tool quiere borrar algo y espera la respuesta del usuario.
     ConfirmDeletion { question: String, reply: async_channel::Sender<bool> },
@@ -110,6 +117,7 @@ pub struct Controller {
     phase: RefCell<Phase>,
     conversation: RefCell<Option<Conversation>>,
     popup: Popup,
+    indicator: Rc<Indicator>,
     tray: RefCell<Option<TrayHandle>>,
     shortcuts: RefCell<Option<Arc<Shortcuts>>>,
     explorer: RefCell<Option<Rc<Explorer>>>,
@@ -134,6 +142,7 @@ impl Controller {
         let this = Rc::new(Self {
             app: app.clone(),
             popup: Popup::new(app, commands.clone()),
+            indicator: Indicator::new(app, commands.clone()),
             commands,
             store,
             config: RefCell::new(config),
@@ -155,6 +164,16 @@ impl Controller {
                 }
             }
         ));
+        // Claves del llavero (y migración de las que estuvieran en config.toml).
+        runtime().spawn(async {
+            if let Err(err) = crate::secrets::load().await {
+                log::error!("Llavero: {err:#}");
+            }
+            if let Err(err) = crate::secrets::migrate_from_config().await {
+                log::error!("No se pudieron mover las claves al llavero: {err:#}");
+            }
+        });
+
         if crate::dev::enabled() {
             log::info!("Modo desarrollo: sin bandeja ni atajos");
         } else {
@@ -218,12 +237,20 @@ impl Controller {
             }
             Command::ToggleRecording => self.toggle_recording(Target::NewConversation),
             Command::TogglePopupRecording => self.toggle_recording(Target::CurrentConversation),
-            Command::AutoStop => self.stop_recording(),
+            Command::AutoStop | Command::StopRecording => self.stop_recording(),
+            Command::CancelRecording => self.cancel_recording(),
+            Command::ConfigChanged => self.reload_config(),
+            Command::ShowPreferences => {
+                let parent = self.explorer.borrow().as_ref().map(|e| e.window().clone().upcast::<gtk::Widget>());
+                let parent = parent.filter(|w| w.is_visible());
+                let _ = crate::preferences::show(parent.as_ref(), self.commands.clone());
+            }
             Command::RecordingFailed(message) => {
                 if let Phase::Recording(recording) = self.phase.replace(Phase::Idle) {
                     recording.recorder.cancel();
                 }
                 self.popup.set_recording(false);
+                self.indicator.hide();
                 self.fail(&message);
             }
             Command::SendText(text) => {
@@ -310,8 +337,13 @@ impl Controller {
         let path = config::audio_dir().join(format!("rec-{}.ogg", chrono::Local::now().format("%Y%m%d-%H%M%S")));
         let weak = Rc::downgrade(self);
         let errors = self.commands.clone();
+        let (device, sounds, show_indicator) = {
+            let r = &self.config.borrow().recording;
+            (r.device.clone(), r.sounds, r.indicator)
+        };
         let recorder = Recorder::start(
             &path,
+            &device,
             move |db| {
                 if let Some(this) = weak.upgrade() {
                     this.on_level(db);
@@ -336,6 +368,13 @@ impl Controller {
         });
         self.set_tray(TrayState::Recording);
         self.popup.set_recording(true);
+        if sounds {
+            audio::play(Sound::Start);
+        }
+        // Grabando desde el popup ya se ve el estado en su botón.
+        if show_indicator && !self.popup.is_active() {
+            self.indicator.show(self.activation_token.borrow().as_deref());
+        }
 
         // Límite de duración en cualquier modo.
         let max = Duration::from_secs(self.config.borrow().recording.max_seconds.max(1).into());
@@ -349,8 +388,9 @@ impl Controller {
         });
     }
 
-    /// Detector de silencio del modo auto_stop.
+    /// Nivel del micrófono: ventanita y detector de silencio del modo auto_stop.
     fn on_level(&self, db: f64) {
+        self.indicator.set_level(db);
         let (mode, threshold, silence) = {
             let config = self.config.borrow();
             let r = &config.recording;
@@ -384,6 +424,10 @@ impl Controller {
             unreachable!()
         };
         self.popup.set_recording(false);
+        self.indicator.hide();
+        if self.config.borrow().recording.sounds {
+            audio::play(Sound::Stop);
+        }
 
         // Pulsaciones accidentales en modo mantener pulsado.
         if recording.recorder.elapsed() < Duration::from_millis(400) {
@@ -565,33 +609,79 @@ impl Controller {
         Ok(())
     }
 
-    /// Capturas del explorador y del popup para revisar la interfaz (ver `dev`).
+    /// Capturas de las ventanas para revisar la interfaz (ver `dev`).
     fn take_snapshots(self: &Rc<Self>, dir: PathBuf) {
         let _ = std::fs::create_dir_all(&dir);
         self.handle(Command::ShowExplorer);
         let explorer = self.explorer.borrow().clone().expect("explorador creado");
-        let mut steps: Vec<Box<dyn FnOnce()>> = Vec::new();
+        let preferences: Rc<RefCell<Option<adw::PreferencesDialog>>> = Rc::default();
+
+        // Cada paso prepara una ventana; tras una pausa se captura.
+        type Window = Box<dyn Fn() -> gtk::Widget>;
+        let mut shots: Vec<(String, Box<dyn FnOnce()>, Window)> = Vec::new();
+        let explorer_window: Rc<dyn Fn() -> gtk::Widget> = {
+            let explorer = explorer.clone();
+            Rc::new(move || explorer.window().clone().upcast())
+        };
         for page in ["notes", "todos", "conversations"] {
-            let shown = explorer.clone();
-            steps.push(Box::new(move || shown.show_page(page)));
-            let (explorer, path) = (explorer.clone(), dir.join(format!("{page}.png")));
-            steps.push(Box::new(move || log_snapshot(crate::dev::save_png(explorer.window(), &path), &path)));
+            let e = explorer.clone();
+            let w = explorer_window.clone();
+            shots.push((page.into(), Box::new(move || e.show_page(page)), Box::new(move || w())));
         }
-        let editing = explorer.clone();
-        steps.push(Box::new(move || {
-            editing.show_page("notes");
-            editing.edit_selected_note();
-        }));
-        let path = dir.join("notes-edit.png");
-        steps.push(Box::new(move || log_snapshot(crate::dev::save_png(explorer.window(), &path), &path)));
+        let e = explorer.clone();
+        let w = explorer_window.clone();
+        shots.push((
+            "notes-edit".into(),
+            Box::new(move || {
+                e.show_page("notes");
+                e.edit_selected_note();
+            }),
+            Box::new(move || w()),
+        ));
         let this = self.clone();
-        steps.push(Box::new(move || {
-            if let Some(c) = this.store.list_conversations(1).ok().and_then(|c| c.into_iter().next()) {
-                this.handle(Command::OpenConversation(c.id));
-            }
-        }));
-        let (this, path) = (self.clone(), dir.join("popup.png"));
-        steps.push(Box::new(move || log_snapshot(crate::dev::save_png(this.popup.window(), &path), &path)));
+        let popup = self.clone();
+        shots.push((
+            "popup".into(),
+            Box::new(move || {
+                if let Some(c) = this.store.list_conversations(1).ok().and_then(|c| c.into_iter().next()) {
+                    this.handle(Command::OpenConversation(c.id));
+                }
+            }),
+            Box::new(move || popup.popup.window().clone().upcast()),
+        ));
+        let this = self.clone();
+        let indicator = self.clone();
+        shots.push((
+            "indicator".into(),
+            Box::new(move || {
+                this.indicator.show(None);
+                this.indicator.set_level(-20.0);
+            }),
+            Box::new(move || indicator.indicator.window().clone().upcast()),
+        ));
+        for page in ["general", "ai", "recording", "data"] {
+            let (e, preferences, commands, this) = (explorer.clone(), preferences.clone(), self.commands.clone(), self.clone());
+            let w = explorer_window.clone();
+            shots.push((
+                format!("prefs-{page}"),
+                Box::new(move || {
+                    this.indicator.hide();
+                    let mut dialog = preferences.borrow_mut();
+                    let dialog = dialog.get_or_insert_with(|| {
+                        crate::preferences::show(Some(e.window().upcast_ref()), commands)
+                    });
+                    dialog.set_visible_page_name(page);
+                }),
+                Box::new(move || w()),
+            ));
+        }
+
+        let mut steps: Vec<Box<dyn FnOnce()>> = Vec::new();
+        for (name, prepare, window) in shots {
+            steps.push(prepare);
+            let path = dir.join(format!("{name}.png"));
+            steps.push(Box::new(move || log_snapshot(crate::dev::save_png(&window(), &path), &path)));
+        }
         let app = self.app.clone();
         steps.push(Box::new(move || app.quit()));
         crate::dev::run_steps(Duration::from_millis(1200), steps);
@@ -609,8 +699,23 @@ impl Controller {
         });
     }
 
+    fn cancel_recording(&self) {
+        if !matches!(*self.phase.borrow(), Phase::Recording(_)) {
+            return;
+        }
+        if let Phase::Recording(recording) = self.phase.replace(Phase::Idle) {
+            recording.recorder.cancel();
+        }
+        self.popup.set_recording(false);
+        self.indicator.hide();
+        self.set_tray(TrayState::Idle);
+    }
+
     fn fail(&self, message: &str) {
         log::error!("{message}");
+        if self.config.borrow().recording.sounds {
+            audio::play(Sound::Error);
+        }
         self.popup.view().add_error(message);
         self.notify("Error del asistente", message);
         self.finish(TrayState::Error);

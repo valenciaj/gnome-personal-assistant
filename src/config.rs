@@ -36,6 +36,42 @@ impl LlmProvider {
         Self::ALL.into_iter().find(|p| p.id() == id)
     }
 
+    /// Niveles de razonamiento que admite cada API: (valor, etiqueta).
+    pub fn reasoning_levels(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Self::Anthropic => &[
+                ("default", "Por defecto del modelo"),
+                ("low", "Bajo"),
+                ("medium", "Medio"),
+                ("high", "Alto"),
+                ("xhigh", "Muy alto"),
+                ("max", "Máximo"),
+            ],
+            Self::Openai | Self::OpenaiCompatible => &[
+                ("default", "Por defecto del modelo"),
+                ("none", "Sin razonamiento"),
+                ("minimal", "Mínimo"),
+                ("low", "Bajo"),
+                ("medium", "Medio"),
+                ("high", "Alto"),
+                ("xhigh", "Muy alto"),
+            ],
+            Self::Ollama => &[
+                ("default", "Por defecto del modelo"),
+                ("off", "Desactivado"),
+                ("on", "Activado"),
+                ("low", "Bajo (gpt-oss)"),
+                ("medium", "Medio (gpt-oss)"),
+                ("high", "Alto (gpt-oss)"),
+            ],
+        }
+    }
+
+    /// Nombre de su API key en el llavero.
+    pub fn secret_name(self) -> String {
+        format!("llm-{}", self.id())
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Anthropic => "Anthropic",
@@ -138,8 +174,20 @@ impl LlmConfig {
         }
     }
 
-    /// Clave del proveedor activo: la del archivo o, si falta, la de la variable de entorno.
+    pub fn settings_mut(&mut self, provider: LlmProvider) -> &mut ProviderSettings {
+        match provider {
+            LlmProvider::Anthropic => &mut self.anthropic,
+            LlmProvider::Openai => &mut self.openai,
+            LlmProvider::Ollama => &mut self.ollama,
+            LlmProvider::OpenaiCompatible => &mut self.openai_compatible,
+        }
+    }
+
+    /// Clave de un proveedor: llavero, archivo de configuración o variable de entorno.
     pub fn api_key(&self, provider: LlmProvider) -> String {
+        if let Some(key) = crate::secrets::get(&provider.secret_name()) {
+            return key;
+        }
         let configured = &self.settings(provider).api_key;
         if !configured.is_empty() {
             return configured.clone();
@@ -177,12 +225,16 @@ impl Default for SttConfig {
     }
 }
 
+pub const STT_SECRET: &str = "stt";
+
 impl SttConfig {
+    /// Clave propia de la transcripción o, si no hay, la de OpenAI del LLM.
     pub fn api_key(&self) -> String {
-        if !self.api_key.is_empty() {
-            return self.api_key.clone();
-        }
-        std::env::var("OPENAI_API_KEY").unwrap_or_default()
+        crate::secrets::get(STT_SECRET)
+            .or_else(|| (!self.api_key.is_empty()).then(|| self.api_key.clone()))
+            .or_else(|| crate::secrets::get(&LlmProvider::Openai.secret_name()))
+            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+            .unwrap_or_default()
     }
 }
 
@@ -196,6 +248,12 @@ pub struct RecordingConfig {
     pub silence_seconds: f64,
     /// Duración máxima de una grabación en cualquier modo.
     pub max_seconds: u32,
+    /// Nodo de PipeWire del micrófono (`node.name`); vacío = el predeterminado.
+    pub device: String,
+    /// Pitidos al empezar y al parar.
+    pub sounds: bool,
+    /// Ventanita con el tiempo y el nivel mientras se graba.
+    pub indicator: bool,
 }
 
 impl Default for RecordingConfig {
@@ -205,6 +263,9 @@ impl Default for RecordingConfig {
             voice_threshold_db: -45.0,
             silence_seconds: 2.0,
             max_seconds: 300,
+            device: String::new(),
+            sounds: true,
+            indicator: true,
         }
     }
 }
@@ -254,7 +315,7 @@ impl Default for Config {
     }
 }
 
-const DEFAULT_SYSTEM_PROMPT: &str = "\
+pub const DEFAULT_SYSTEM_PROMPT: &str = "\
 Eres un asistente personal de escritorio. El usuario te habla por voz, así que \
 sus mensajes son transcripciones y pueden contener errores de reconocimiento: \
 interpreta la intención más probable. Responde en el mismo idioma que el usuario, \

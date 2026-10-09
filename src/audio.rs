@@ -15,18 +15,25 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    /// Empieza a grabar en `path`. `on_level` recibe el nivel RMS en dBFS cada 50 ms;
+    /// Empieza a grabar en `path` desde `device` (nodo de PipeWire; vacío = el
+    /// predeterminado). `on_level` recibe el nivel RMS en dBFS cada 50 ms;
     /// `on_error` se llama si el pipeline falla durante la grabación.
     pub fn start(
         path: &Path,
+        device: &str,
         on_level: impl Fn(f64) + 'static,
         on_error: impl Fn(String) + 'static,
     ) -> Result<Self> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
+        let source = if device.is_empty() {
+            "pipewiresrc".to_owned()
+        } else {
+            format!("pipewiresrc target-object=\"{}\"", device.replace('"', ""))
+        };
         let description = format!(
-            "pipewiresrc ! audioconvert ! audioresample ! audio/x-raw,channels=1,rate=48000 \
+            "{source} ! audioconvert ! audioresample ! audio/x-raw,channels=1,rate=48000 \
              ! level interval=50000000 post-messages=true \
              ! opusenc bitrate=32000 ! oggmux ! filesink location=\"{}\"",
             path.display()
@@ -103,4 +110,55 @@ impl Recorder {
         let _ = self.pipeline.set_state(gst::State::Null);
         let _ = std::fs::remove_file(&self.path);
     }
+}
+
+/// Micrófonos disponibles: (nombre visible, nodo de PipeWire).
+pub fn input_devices() -> Vec<(String, String)> {
+    let monitor = gst::DeviceMonitor::new();
+    monitor.add_filter(Some("Audio/Source"), None);
+    if monitor.start().is_err() {
+        return Vec::new();
+    }
+    let devices = monitor
+        .devices()
+        .into_iter()
+        .filter_map(|device| {
+            let node = device.properties()?.get::<String>("node.name").ok()?;
+            // Las «fuentes» de monitor son la salida de los altavoces, no micrófonos.
+            (!node.ends_with(".monitor")).then(|| (device.display_name().to_string(), node))
+        })
+        .collect();
+    monitor.stop();
+    devices
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Sound {
+    Start,
+    Stop,
+    Error,
+}
+
+/// Reproduce un sonido corto del tema de sonidos del sistema.
+pub fn play(sound: Sound) {
+    use gtk::prelude::*;
+    thread_local! {
+        static PLAYING: std::cell::RefCell<Option<gtk::MediaFile>> = const { std::cell::RefCell::new(None) };
+    }
+    let name = match sound {
+        Sound::Start => "device-added",
+        Sound::Stop => "device-removed",
+        Sound::Error => "dialog-warning",
+    };
+    let Some(path) = ["/usr/share/sounds/Yaru/stereo", "/usr/share/sounds/freedesktop/stereo"]
+        .iter()
+        .map(|dir| Path::new(dir).join(format!("{name}.oga")))
+        .find(|p| p.exists())
+    else {
+        return;
+    };
+    let media = gtk::MediaFile::for_filename(&path);
+    media.play();
+    // Se guarda para que no se destruya (y calle) antes de terminar.
+    PLAYING.with(|playing| *playing.borrow_mut() = Some(media));
 }

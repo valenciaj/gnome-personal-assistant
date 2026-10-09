@@ -18,7 +18,7 @@ Un único proceso Rust (sin extensión JS de GNOME Shell):
 | Datos | SQLite (`rusqlite`, bundled, FTS5) en `~/.local/share/personal-assistant/` |
 | Audios | `~/.local/share/personal-assistant/audio/*.ogg` |
 | Credenciales | Llavero GNOME / Secret Service (`oo7`) |
-| Ajustes | GSettings (schema propio) |
+| Ajustes | `~/.config/personal-assistant/config.toml` (editable desde Preferencias; se descartó GSettings para no depender de esquemas compilados) |
 | Markdown | `pulldown-cmark` → `GtkTextView` con tags; edición con GtkSourceView 5 |
 | i18n | gettext (`gettext-rs`), es + en |
 | Notificaciones | `GNotification` |
@@ -101,7 +101,7 @@ Proceso residente con temporizador: al llegar `recordatorio` de un TODO se lanza
 1. **MVP**: app GTK residente + bandeja + atajo (portal) + grabación GStreamer + STT OpenAI + LLM (los 4 proveedores, modelo y razonamiento desde un config mínimo) + popup + notificación.
 2. **Datos y tools**: SQLite, migraciones, todas las tools, confirmación de borrado, historial de conversaciones, retención de audio.
 3. **Explorador**: ventana principal con Conversaciones, Notas, TODOs; edición completa, Markdown, reproducción.
-4. **Preferencias**: GSettings, llavero, listado de modelos, modos de grabación, VAD, ventanita, sonidos.
+4. **Preferencias**: ventana de preferencias sobre config.toml, llavero, listado de modelos, modos de grabación, VAD, micrófono, ventanita, sonidos.
 5. **Remate**: recordatorios, i18n (es/en), autoarranque, `.deb` (`cargo-deb`).
 
 Git local con un commit por fase.
