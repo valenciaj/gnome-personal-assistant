@@ -111,7 +111,10 @@ impl Popup {
             let entry = entry.clone();
             move || {
                 let text = entry.text().trim().to_owned();
-                if !text.is_empty() {
+                if text.is_empty() {
+                    // Intro sin texto mientras se graba: parar y enviar la grabación.
+                    let _ = commands.try_send(Command::StopRecording);
+                } else {
                     entry.set_text("");
                     let _ = commands.try_send(Command::SendText(text));
                 }

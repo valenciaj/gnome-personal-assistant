@@ -16,6 +16,7 @@ use crate::i18n::tr;
 
 pub struct Indicator {
     window: adw::Window,
+    stop: gtk::Button,
     time: gtk::Label,
     level: gtk::LevelBar,
     started: Cell<Instant>,
@@ -78,7 +79,9 @@ impl Indicator {
                 let _ = commands.try_send(command.clone());
             });
         }
-        let keys = gtk::EventControllerKey::new();
+        // En fase de captura: si no, el botón enfocado se queda con Intro/Espacio
+        // antes de que lleguen aquí (y el primero es «Descartar»).
+        let keys = gtk::EventControllerKey::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
         keys.connect_key_pressed(move |_, key, _, _| match key {
             gtk::gdk::Key::Escape => {
                 let _ = commands.try_send(Command::CancelRecording);
@@ -92,7 +95,7 @@ impl Indicator {
         });
         window.add_controller(keys);
 
-        Rc::new(Self { window, time, level, started: Cell::new(Instant::now()), timer: RefCell::new(None) })
+        Rc::new(Self { window, stop, time, level, started: Cell::new(Instant::now()), timer: RefCell::new(None) })
     }
 
     pub fn show(self: &Rc<Self>, activation_token: Option<&str>) {
@@ -113,6 +116,7 @@ impl Indicator {
             self.window.set_startup_id(token);
         }
         self.window.present();
+        self.stop.grab_focus();
     }
 
     pub fn window(&self) -> &adw::Window {
