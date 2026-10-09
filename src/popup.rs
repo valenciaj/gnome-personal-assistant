@@ -6,6 +6,7 @@ use gtk::glib;
 use crate::app::Command;
 use crate::llm::DisplayItem;
 use crate::markdown;
+use crate::store::{MessageKind, MessageRecord};
 
 pub const CSS: &str = "
 .user-bubble {
@@ -20,6 +21,7 @@ pub const CSS: &str = "
     padding: 6px 10px;
     background: alpha(@card_fg_color, 0.06);
 }
+.confirmation { padding: 12px; }
 ";
 
 pub struct Popup {
@@ -205,16 +207,79 @@ impl Popup {
                     self.append(&label);
                 }
                 DisplayItem::Tool(result) => {
-                    let label = wrapped_label();
-                    let icon = if result.is_error { "⚠" } else { "⚙" };
-                    label.set_text(&format!("{icon} {}", result.call.name));
-                    label.set_tooltip_text(Some(&result.content));
-                    label.add_css_class("tool-call");
-                    label.add_css_class("caption");
-                    self.append(&label);
+                    self.add_tool(&result.summary, &result.content, result.is_error);
                 }
             }
         }
+    }
+
+    /// Reconstruye un mensaje guardado en el historial.
+    pub fn add_record(&self, record: &MessageRecord) {
+        match record.kind {
+            MessageKind::User => self.add_user(&record.content),
+            MessageKind::Reasoning => self.add_items(&[DisplayItem::Reasoning(record.content.clone())]),
+            MessageKind::Text => self.add_items(&[DisplayItem::Text(record.content.clone())]),
+            MessageKind::Tool => {
+                self.add_tool(&record.content, record.tool_output.as_deref().unwrap_or_default(), record.is_error)
+            }
+            MessageKind::Error => self.add_error(&record.content),
+        }
+    }
+
+    fn add_tool(&self, summary: &str, detail: &str, is_error: bool) {
+        let label = wrapped_label();
+        let icon = if is_error { "⚠" } else { "✓" };
+        label.set_text(&format!("{icon} {summary}"));
+        label.set_tooltip_text(Some(detail));
+        label.add_css_class("tool-call");
+        label.add_css_class("caption");
+        if is_error {
+            label.add_css_class("error");
+        }
+        self.append(&label);
+    }
+
+    /// Pregunta si se borra algo; la respuesta vuelve a la tool por `reply`.
+    pub fn ask_confirmation(&self, question: &str, reply: async_channel::Sender<bool>) {
+        let label = wrapped_label();
+        label.set_text(question);
+        label.set_selectable(false);
+
+        let cancel = gtk::Button::with_label("Cancelar");
+        let delete = gtk::Button::builder().label("Borrar").css_classes(["destructive-action"]).build();
+        let buttons = gtk::Box::builder().spacing(6).halign(gtk::Align::End).build();
+        buttons.append(&cancel);
+        buttons.append(&delete);
+
+        let card = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).build();
+        card.add_css_class("card");
+        card.add_css_class("confirmation");
+        card.append(&label);
+        card.append(&buttons);
+        self.append(&card);
+        self.set_status(Some("Esperando confirmación…"));
+        delete.grab_focus();
+
+        let answer = {
+            let status = self.status_label.clone();
+            move |confirmed: bool| {
+                let _ = reply.try_send(confirmed);
+                card.remove(&buttons);
+                let result = gtk::Label::builder()
+                    .label(if confirmed { "Borrado confirmado" } else { "Borrado cancelado" })
+                    .halign(gtk::Align::End)
+                    .css_classes(["dim-label", "caption"])
+                    .build();
+                card.append(&result);
+                status.set_text("Pensando…");
+            }
+        };
+        let answer = std::rc::Rc::new(answer);
+        delete.connect_clicked({
+            let answer = answer.clone();
+            move |_| answer(true)
+        });
+        cancel.connect_clicked(move |_| answer(false));
     }
 
     pub fn add_error(&self, message: &str) {

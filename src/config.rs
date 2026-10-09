@@ -20,6 +20,22 @@ pub enum LlmProvider {
 }
 
 impl LlmProvider {
+    pub const ALL: [Self; 4] = [Self::Anthropic, Self::Openai, Self::Ollama, Self::OpenaiCompatible];
+
+    /// Identificador estable que se guarda en la base de datos.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Anthropic => "anthropic",
+            Self::Openai => "openai",
+            Self::Ollama => "ollama",
+            Self::OpenaiCompatible => "openai_compatible",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.id() == id)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Anthropic => "Anthropic",
@@ -193,6 +209,29 @@ impl Default for RecordingConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioRetention {
+    /// Se conserva solo el audio que la IA adjunta a una nota.
+    WithNotes,
+    /// Se conservan todas las grabaciones en el historial de conversaciones.
+    Always,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AudioConfig {
+    pub retention: AudioRetention,
+    /// Días tras los que se borran los audios que no están en una nota (0 = nunca).
+    pub delete_after_days: u32,
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self { retention: AudioRetention::WithNotes, delete_after_days: 30 }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -200,6 +239,7 @@ pub struct Config {
     pub stt: SttConfig,
     pub llm: LlmConfig,
     pub recording: RecordingConfig,
+    pub audio: AudioConfig,
 }
 
 impl Default for Config {
@@ -209,6 +249,7 @@ impl Default for Config {
             stt: SttConfig::default(),
             llm: LlmConfig::default(),
             recording: RecordingConfig::default(),
+            audio: AudioConfig::default(),
         }
     }
 }
@@ -226,10 +267,14 @@ pub fn config_path() -> PathBuf {
         .join("config.toml")
 }
 
-pub fn cache_dir() -> PathBuf {
-    dirs::cache_dir()
-        .unwrap_or_else(std::env::temp_dir)
+pub fn data_dir() -> PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
         .join(DIR_NAME)
+}
+
+pub fn audio_dir() -> PathBuf {
+    data_dir().join("audio")
 }
 
 impl Config {

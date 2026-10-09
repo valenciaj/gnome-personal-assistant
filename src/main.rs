@@ -6,7 +6,9 @@ mod markdown;
 mod popup;
 mod runtime;
 mod shortcuts;
+mod store;
 mod stt;
+mod tools;
 mod tray;
 
 use std::cell::OnceCell;
@@ -26,7 +28,9 @@ Si ya está en marcha, las órdenes se envían a esa instancia:
   toggle    Empezar o parar una grabación
   new       Abrir el popup para escribir
   reopen    Mostrar la última conversación
+  open ID   Abrir una conversación del historial para seguirla
   quit      Cerrar el asistente
+  history   Listar las conversaciones guardadas
   models    Listar los modelos del proveedor de LLM configurado
   config    Mostrar la ruta del archivo de configuración";
 
@@ -40,6 +44,7 @@ fn main() -> glib::ExitCode {
             return glib::ExitCode::SUCCESS;
         }
         Some("models") => return list_models(),
+        Some("history") => return list_history(),
         Some("config") => {
             if let Err(err) = config::Config::load() {
                 eprintln!("{err:#}");
@@ -85,6 +90,13 @@ fn main() -> glib::ExitCode {
             Some("new") => Some(Command::NewTextConversation),
             Some("reopen") => Some(Command::Reopen),
             Some("quit") => Some(Command::Quit),
+            Some("open") => match args.get(2).and_then(|id| id.to_str()?.parse().ok()) {
+                Some(id) => Some(Command::OpenConversation(id)),
+                None => {
+                    cmdline.printerr_literal("Uso: gnome-personal-assistant open ID\n");
+                    return glib::ExitCode::FAILURE;
+                }
+            },
             Some(other) => {
                 cmdline.printerr_literal(&format!("Orden desconocida: {other}\n\n{USAGE}\n"));
                 return glib::ExitCode::FAILURE;
@@ -138,6 +150,26 @@ fn list_models() -> glib::ExitCode {
         Ok(models) => {
             for model in models {
                 println!("  {model}");
+            }
+            glib::ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("{err:#}");
+            glib::ExitCode::FAILURE
+        }
+    }
+}
+
+fn list_history() -> glib::ExitCode {
+    let result = store::Store::open(&config::data_dir().join("assistant.db"))
+        .and_then(|store| store.list_conversations(50));
+    match result {
+        Ok(conversations) => {
+            for c in conversations {
+                let when = chrono::DateTime::from_timestamp(c.modified, 0)
+                    .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_default();
+                println!("{:>5}  {when}  {:<10} {}", c.id, c.provider, c.title);
             }
             glib::ExitCode::SUCCESS
         }

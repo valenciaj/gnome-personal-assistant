@@ -5,6 +5,7 @@
 //! runtime de tokio y se esperan desde aquí con `runtime().spawn(...).await`.
 
 use std::cell::RefCell;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -14,11 +15,13 @@ use gtk::{gio, glib};
 use serde_json::Value;
 
 use crate::audio::Recorder;
-use crate::config::{self, Config, RecordingMode};
+use crate::config::{self, AudioRetention, Config, LlmProvider, RecordingMode};
 use crate::llm::{self, DisplayItem};
 use crate::popup::Popup;
 use crate::runtime::runtime;
 use crate::shortcuts::Shortcuts;
+use crate::store::{MessageKind, MessageRecord, Store};
+use crate::tools::{self, Toolbox, TurnContext};
 use crate::tray::{self, TrayHandle, TrayState};
 
 #[derive(Debug, Clone)]
@@ -39,6 +42,10 @@ pub enum Command {
     /// El detector de silencio ha decidido parar.
     AutoStop,
     RecordingFailed(String),
+    /// Una tool quiere borrar algo y espera la respuesta del usuario.
+    ConfirmDeletion { question: String, reply: async_channel::Sender<bool> },
+    /// Mostrar y continuar una conversación del historial.
+    OpenConversation(i64),
     Quit,
 }
 
@@ -64,10 +71,13 @@ enum Phase {
 }
 
 struct Conversation {
+    /// Fila en la base de datos; se crea con el primer mensaje.
+    id: Option<i64>,
     client: llm::Client,
     /// Se fija al empezar y no cambia: la API de Claude exige un prefijo idéntico
     /// en cada turno para conservar los bloques de razonamiento.
     system: String,
+    /// Historial en el formato nativo del proveedor.
     messages: Vec<Value>,
 }
 
@@ -75,16 +85,25 @@ impl Conversation {
     fn new(config: &Config) -> anyhow::Result<Self> {
         let now = chrono::Local::now().format("%A, %Y-%m-%d %H:%M (UTC%:z)");
         Ok(Self {
+            id: None,
             client: llm::Client::from_config(&config.llm)?,
-            system: format!("{}\n\nFecha y hora actuales: {now}.", config.system_prompt),
+            system: format!("{}\n\n{}\n\nFecha y hora actuales: {now}.", config.system_prompt, tools::GUIDANCE),
             messages: Vec::new(),
         })
     }
 }
 
+/// Resultado de un turno del agente.
+struct TurnOutcome {
+    /// Una nota se ha quedado con el audio del mensaje.
+    audio_used: bool,
+    error: Option<String>,
+}
+
 pub struct Controller {
     app: adw::Application,
     commands: async_channel::Sender<Command>,
+    store: Store,
     config: RefCell<Config>,
     phase: RefCell<Phase>,
     conversation: RefCell<Option<Conversation>>,
@@ -105,10 +124,15 @@ impl Controller {
             log::error!("{err:#}");
             Config::default()
         });
+        let store = Store::open(&config::data_dir().join("assistant.db")).unwrap_or_else(|err| {
+            log::error!("{err:#}; los datos de esta sesión no se guardarán");
+            Store::in_memory().expect("SQLite en memoria")
+        });
         let this = Rc::new(Self {
             app: app.clone(),
             popup: Popup::new(app, commands.clone()),
             commands,
+            store,
             config: RefCell::new(config),
             phase: RefCell::new(Phase::Idle),
             conversation: RefCell::new(None),
@@ -132,6 +156,16 @@ impl Controller {
             this,
             async move { this.connect_services().await }
         ));
+
+        this.clean_audio();
+        let weak = Rc::downgrade(&this);
+        glib::timeout_add_seconds_local(6 * 3600, move || match weak.upgrade() {
+            Some(this) => {
+                this.clean_audio();
+                glib::ControlFlow::Continue
+            }
+            None => glib::ControlFlow::Break,
+        });
         this
     }
 
@@ -187,8 +221,20 @@ impl Controller {
                     glib::spawn_future_local(glib::clone!(
                         #[strong(rename_to = this)]
                         self,
-                        async move { this.ask(text).await }
+                        async move { this.ask(text, None).await }
                     ));
+                }
+            }
+            Command::ConfirmDeletion { question, reply } => {
+                self.present_popup();
+                self.popup.ask_confirmation(&question, reply);
+            }
+            Command::OpenConversation(id) => {
+                if matches!(*self.phase.borrow(), Phase::Idle) {
+                    self.reload_config();
+                    if let Err(err) = self.open_conversation(id) {
+                        self.fail(&format!("{err:#}"));
+                    }
                 }
             }
             Command::NewTextConversation => {
@@ -242,7 +288,7 @@ impl Controller {
             *next += 1;
             *next
         };
-        let path = config::cache_dir().join(format!("rec-{}.ogg", chrono::Local::now().format("%Y%m%d-%H%M%S")));
+        let path = config::audio_dir().join(format!("rec-{}.ogg", chrono::Local::now().format("%Y%m%d-%H%M%S")));
         let weak = Rc::downgrade(self);
         let errors = self.commands.clone();
         let recorder = Recorder::start(
@@ -341,15 +387,19 @@ impl Controller {
             self,
             async move {
                 match this.transcribe(recording.recorder).await {
-                    Ok(text) if text.is_empty() => this.fail("No se ha detectado voz en la grabación"),
-                    Ok(text) => this.ask(text).await,
+                    Ok((text, path)) if text.is_empty() => {
+                        let _ = std::fs::remove_file(path);
+                        this.fail("No se ha detectado voz en la grabación");
+                    }
+                    Ok((text, path)) => this.ask(text, Some(path)).await,
                     Err(err) => this.fail(&format!("{err:#}")),
                 }
             }
         ));
     }
 
-    async fn transcribe(&self, recorder: Recorder) -> anyhow::Result<String> {
+    /// Devuelve el texto y la ruta del audio, que se conserva según la retención.
+    async fn transcribe(&self, recorder: Recorder) -> anyhow::Result<(String, PathBuf)> {
         let path = recorder.stop().await?;
         let stt = self.config.borrow().stt.clone();
         let result = runtime()
@@ -358,65 +408,146 @@ impl Controller {
                 async move { crate::stt::transcribe(&stt, &path).await }
             })
             .await?;
-        // Fase 2: según la retención configurada, el audio se conservará con la nota.
-        let _ = std::fs::remove_file(&path);
-        result
+        match result {
+            Ok(text) => Ok((text, path)),
+            Err(err) => {
+                let _ = std::fs::remove_file(&path);
+                Err(err)
+            }
+        }
     }
 
-    /// Envía un mensaje del usuario y muestra la respuesta.
-    async fn ask(self: Rc<Self>, text: String) {
+    /// Envía un mensaje del usuario (con su audio, si lo dictó) y muestra la respuesta.
+    async fn ask(self: Rc<Self>, text: String, audio: Option<PathBuf>) {
         *self.phase.borrow_mut() = Phase::Processing;
         self.set_tray(TrayState::Busy);
         self.popup.add_user(&text);
         self.popup.set_status(Some("Pensando…"));
 
-        let conversation = match self.conversation.borrow_mut().take() {
-            Some(conversation) => Ok(conversation),
-            None => Conversation::new(&self.config.borrow()),
-        };
-        let mut conversation = match conversation {
-            Ok(conversation) => conversation,
-            Err(err) => return self.fail(&format!("{err:#}")),
-        };
+        let config = self.config.borrow().clone();
+        let outcome = self.run_turn(&config, &text, audio.as_deref()).await;
+        let outcome = outcome.unwrap_or_else(|err| TurnOutcome { audio_used: false, error: Some(format!("{err:#}")) });
 
-        let previous_len = conversation.messages.len();
-        conversation.messages.push(conversation.client.user_message(&text));
-        let outcome = runtime()
-            .spawn(async move {
-                let result = llm::run_agent(
-                    &conversation.client,
-                    &conversation.system,
-                    &mut conversation.messages,
-                    &[],
-                    &llm::NoTools,
-                )
-                .await;
-                (conversation, result)
-            })
-            .await;
-
-        let (mut conversation, result) = match outcome {
-            Ok(outcome) => outcome,
-            Err(err) => return self.fail(&format!("Error interno: {err}")),
-        };
-        match result {
-            Ok(items) => {
-                self.popup.add_items(&items);
-                if let Some(DisplayItem::Text(answer)) =
-                    items.iter().rev().find(|i| matches!(i, DisplayItem::Text(_)))
-                {
-                    self.notify("Asistente", answer);
-                }
-                *self.conversation.borrow_mut() = Some(conversation);
-                self.finish(TrayState::Idle);
-            }
-            Err(err) => {
-                // Se descarta el turno fallido para poder reintentar sobre un historial válido.
-                conversation.messages.truncate(previous_len);
-                *self.conversation.borrow_mut() = Some(conversation);
-                self.fail(&format!("{err:#}"));
+        if let Some(path) = &audio {
+            let keep = outcome.audio_used || config.audio.retention == AudioRetention::Always;
+            if !keep {
+                let _ = std::fs::remove_file(path);
             }
         }
+        match outcome.error {
+            None => self.finish(TrayState::Idle),
+            Some(error) => self.fail(&error),
+        }
+    }
+
+    async fn run_turn(&self, config: &Config, text: &str, audio: Option<&Path>) -> anyhow::Result<TurnOutcome> {
+        let mut conversation = match self.conversation.borrow_mut().take() {
+            Some(conversation) => conversation,
+            None => Conversation::new(config)?,
+        };
+        let outcome = self.run_turn_in(&mut conversation, config, text, audio).await;
+        *self.conversation.borrow_mut() = Some(conversation);
+        outcome
+    }
+
+    async fn run_turn_in(
+        &self,
+        conversation: &mut Conversation,
+        config: &Config,
+        text: &str,
+        audio: Option<&Path>,
+    ) -> anyhow::Result<TurnOutcome> {
+        let audio = audio.map(|p| p.to_string_lossy().into_owned());
+        let id = match conversation.id {
+            Some(id) => id,
+            None => {
+                let client = &conversation.client;
+                let id = self.store.create_conversation(text, client.provider.id(), &client.model, &conversation.system)?;
+                conversation.id = Some(id);
+                id
+            }
+        };
+        let mut user = MessageRecord::new(MessageKind::User, text);
+        if config.audio.retention == AudioRetention::Always {
+            user.audio_path = audio.clone();
+        }
+        self.store.add_message(id, &user)?;
+
+        let toolbox = Toolbox::new(
+            self.store.clone(),
+            self.commands.clone(),
+            TurnContext {
+                conversation_id: Some(id),
+                transcript: audio.is_some().then(|| text.to_owned()),
+                audio_path: audio,
+            },
+        );
+        let client = conversation.client.clone();
+        let system = conversation.system.clone();
+        // Se trabaja sobre una copia: si el turno falla, el historial queda como estaba.
+        let mut messages = conversation.messages.clone();
+        messages.push(client.user_message(text));
+        let (messages, items, audio_used, result) = runtime()
+            .spawn(async move {
+                let mut items = Vec::new();
+                let result =
+                    llm::run_agent(&client, &system, &mut messages, &tools::specs(), &toolbox, &mut items).await;
+                (messages, items, toolbox.audio_used(), result)
+            })
+            .await?;
+
+        for item in &items {
+            self.store.add_message(id, &record_for(item))?;
+        }
+        self.popup.add_items(&items);
+
+        let error = match result {
+            Ok(()) => {
+                conversation.messages = messages;
+                self.store.save_native(id, &conversation.messages)?;
+                if let Some(DisplayItem::Text(answer)) = items.iter().rev().find(|i| matches!(i, DisplayItem::Text(_))) {
+                    self.notify("Asistente", answer);
+                }
+                None
+            }
+            Err(err) => {
+                let message = format!("{err:#}");
+                self.store.add_message(id, &MessageRecord::new(MessageKind::Error, &message))?;
+                Some(message)
+            }
+        };
+        Ok(TurnOutcome { audio_used, error })
+    }
+
+    /// Carga una conversación guardada en el popup para seguirla.
+    fn open_conversation(&self, id: i64) -> anyhow::Result<()> {
+        let info = self.store.get_conversation(id)?;
+        let records = self.store.messages(id)?;
+        self.popup.clear();
+        for record in &records {
+            self.popup.add_record(record);
+        }
+        self.present_popup();
+
+        let provider = LlmProvider::from_id(&info.provider)
+            .ok_or_else(|| anyhow::anyhow!("Proveedor desconocido: {}", info.provider))?;
+        // Se continúa con el proveedor y el modelo con los que empezó.
+        let client = llm::Client::new(&self.config.borrow().llm, provider, Some(&info.model))?;
+        *self.conversation.borrow_mut() =
+            Some(Conversation { id: Some(id), client, system: info.system, messages: info.native });
+        Ok(())
+    }
+
+    /// Borra los audios que no se van a usar: huérfanos de más de una hora y, si se
+    /// ha configurado, los del historial con más de N días. Los de notas nunca.
+    fn clean_audio(&self) {
+        let days = self.config.borrow().audio.delete_after_days;
+        let store = self.store.clone();
+        runtime().spawn_blocking(move || {
+            if let Err(err) = clean_audio(&store, days) {
+                log::warn!("Limpieza de audios: {err:#}");
+            }
+        });
     }
 
     fn fail(&self, message: &str) {
@@ -453,4 +584,43 @@ impl Controller {
         notification.set_default_action("app.reopen");
         self.app.send_notification(Some("assistant"), &notification);
     }
+}
+
+fn record_for(item: &DisplayItem) -> MessageRecord {
+    match item {
+        DisplayItem::Reasoning(text) => MessageRecord::new(MessageKind::Reasoning, text),
+        DisplayItem::Text(text) => MessageRecord::new(MessageKind::Text, text),
+        DisplayItem::Tool(result) => MessageRecord {
+            tool_name: Some(result.call.name.clone()),
+            tool_input: Some(result.call.input.to_string()),
+            tool_output: Some(result.content.clone()),
+            is_error: result.is_error,
+            ..MessageRecord::new(MessageKind::Tool, &result.summary)
+        },
+    }
+}
+
+fn clean_audio(store: &Store, days: u32) -> anyhow::Result<()> {
+    let dir = config::audio_dir();
+    if !dir.exists() {
+        return Ok(());
+    }
+    let in_notes = store.note_audio_paths()?;
+    let referenced = store.referenced_audio_paths()?;
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        let key = path.to_string_lossy().into_owned();
+        if in_notes.contains(&key) {
+            continue;
+        }
+        let age = path.metadata()?.modified()?.elapsed().unwrap_or_default();
+        let orphan = !referenced.contains(&key) && age > Duration::from_secs(3600);
+        let expired = days > 0 && age > Duration::from_secs(u64::from(days) * 86_400);
+        if orphan || expired {
+            log::info!("Borrando audio {}", path.display());
+            std::fs::remove_file(&path)?;
+            store.forget_message_audio(&key)?;
+        }
+    }
+    Ok(())
 }

@@ -27,5 +27,14 @@ en cada interacción. Las API keys pueden ir en el archivo o en las variables
 ```sh
 gnome-personal-assistant models   # modelos disponibles del proveedor activo
 gnome-personal-assistant toggle   # grabar / parar (útil en atajos personalizados)
+gnome-personal-assistant history  # conversaciones guardadas
+gnome-personal-assistant open 12  # reabrir y continuar la conversación 12
 gnome-personal-assistant quit
 ```
+
+## Datos
+
+`~/.local/share/personal-assistant/`: base de datos `assistant.db` (SQLite) y
+grabaciones en `audio/`. Qué audios se conservan lo decide `[audio]` en la
+configuración: `retention = "with_notes"` (solo los adjuntos a notas) o `"always"`,
+y `delete_after_days` para el historial (los de notas no se borran nunca).
