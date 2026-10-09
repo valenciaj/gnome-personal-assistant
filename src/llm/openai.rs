@@ -67,7 +67,7 @@ pub async fn complete(
     if !raw_calls.is_empty() {
         native["tool_calls"] = Value::Array(raw_calls);
     }
-    Ok(Turn { native, text, reasoning, tool_calls })
+    Ok(Turn { native: vec![native], text, reasoning, tool_calls })
 }
 
 pub fn tools_json(tools: &[ToolSpec]) -> Value {

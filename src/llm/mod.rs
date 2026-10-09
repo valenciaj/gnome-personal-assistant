@@ -7,6 +7,7 @@
 mod anthropic;
 mod ollama;
 mod openai;
+mod openai_responses;
 
 use std::time::Duration;
 
@@ -57,8 +58,9 @@ pub struct ToolResult {
 /// Una respuesta del modelo ya interpretada.
 #[derive(Debug)]
 pub struct Turn {
-    /// Mensaje del asistente en formato nativo, para añadirlo al historial sin tocarlo.
-    pub native: Value,
+    /// Lo que devuelve el modelo en formato nativo, para añadirlo al historial sin
+    /// tocarlo (un mensaje; en la API Responses de OpenAI, varios elementos).
+    pub native: Vec<Value>,
     pub text: String,
     pub reasoning: String,
     pub tool_calls: Vec<ToolCall>,
@@ -118,9 +120,9 @@ impl Client {
     async fn complete(&self, system: &str, messages: &[Value], tools: &[ToolSpec]) -> Result<Turn> {
         match self.provider {
             LlmProvider::Anthropic => anthropic::complete(self, system, messages, tools).await,
-            LlmProvider::Openai | LlmProvider::OpenaiCompatible => {
-                openai::complete(self, system, messages, tools).await
-            }
+            // OpenAI solo admite tools junto con razonamiento en la API Responses.
+            LlmProvider::Openai => openai_responses::complete(self, system, messages, tools).await,
+            LlmProvider::OpenaiCompatible => openai::complete(self, system, messages, tools).await,
             LlmProvider::Ollama => ollama::complete(self, system, messages, tools).await,
         }
     }
@@ -128,9 +130,8 @@ impl Client {
     fn tool_result_messages(&self, results: &[ToolResult]) -> Vec<Value> {
         match self.provider {
             LlmProvider::Anthropic => anthropic::tool_result_messages(results),
-            LlmProvider::Openai | LlmProvider::OpenaiCompatible => {
-                openai::tool_result_messages(results)
-            }
+            LlmProvider::Openai => openai_responses::tool_result_messages(results),
+            LlmProvider::OpenaiCompatible => openai::tool_result_messages(results),
             LlmProvider::Ollama => ollama::tool_result_messages(results),
         }
     }
@@ -199,7 +200,7 @@ pub async fn run_agent(
 ) -> Result<()> {
     for _ in 0..MAX_ITERATIONS {
         let turn = client.complete(system, messages, tools).await?;
-        messages.push(turn.native);
+        messages.extend(turn.native);
         if !turn.reasoning.trim().is_empty() {
             display.push(DisplayItem::Reasoning(turn.reasoning));
         }
@@ -330,14 +331,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn openai_tool_loop() {
+    async fn openai_compatible_tool_loop() {
         let first = json!({ "choices": [{ "message": {
             "role": "assistant", "content": null,
             "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "add_todo", "arguments": "{\"text\":\"pan\"}"}}]
         }}]});
         let second = json!({ "choices": [{ "message": { "role": "assistant", "content": "Añadido." }}]});
         let (url, received) = mock_server(vec![first, second]).await;
-        let client = client(LlmProvider::Openai, url);
+        let client = client(LlmProvider::OpenaiCompatible, url);
         let mut messages = vec![client.user_message("apunta pan")];
         let mut display = Vec::new();
         run_agent(&client, "sys", &mut messages, &tool(), &Echo, &mut display).await.unwrap();
@@ -348,5 +349,33 @@ mod tests {
         assert_eq!(requests[1]["messages"][2]["tool_calls"][0]["id"], "call_1");
         assert_eq!(requests[1]["messages"][3], json!({"role": "tool", "tool_call_id": "call_1", "content": "{\"ok\":\"pan\"}"}));
         assert!(matches!(display.last(), Some(DisplayItem::Text(t)) if t == "Añadido."));
+    }
+
+    #[tokio::test]
+    async fn openai_responses_tool_loop() {
+        let reasoning = json!({"type": "reasoning", "id": "rs_1", "summary": [{"type": "summary_text", "text": "pensando"}], "encrypted_content": "cifrado"});
+        let call = json!({"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "add_todo", "arguments": "{\"text\":\"pan\"}"});
+        let first = json!({ "status": "completed", "output": [reasoning, call] });
+        let second = json!({ "status": "completed", "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Añadido."}]}
+        ]});
+        let (url, received) = mock_server(vec![first, second]).await;
+        let mut client = client(LlmProvider::Openai, url);
+        client.reasoning = "low".into();
+        let mut messages = vec![client.user_message("apunta pan")];
+        let mut display = Vec::new();
+        run_agent(&client, "sys", &mut messages, &tool(), &Echo, &mut display).await.unwrap();
+
+        let requests = received.lock().unwrap();
+        assert_eq!(requests[0]["instructions"], "sys");
+        assert_eq!(requests[0]["store"], false);
+        assert_eq!(requests[0]["reasoning"], json!({"effort": "low", "summary": "auto"}));
+        assert_eq!(requests[0]["include"], json!(["reasoning.encrypted_content"]));
+        assert_eq!(requests[0]["tools"][0], json!({"type": "function", "name": "add_todo", "description": "x", "parameters": {"type": "object"}}));
+        // Razonamiento cifrado y llamada vuelven tal cual, seguidos del resultado.
+        assert_eq!(requests[1]["input"][1], reasoning);
+        assert_eq!(requests[1]["input"][2], call);
+        assert_eq!(requests[1]["input"][3], json!({"type": "function_call_output", "call_id": "call_1", "output": "{\"ok\":\"pan\"}"}));
+        assert!(matches!(&display[..], [DisplayItem::Reasoning(r), DisplayItem::Tool(_), DisplayItem::Text(t)] if r == "pensando" && t == "Añadido."));
     }
 }

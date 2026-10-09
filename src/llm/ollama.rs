@@ -55,7 +55,7 @@ pub async fn complete(
         })
         .collect();
 
-    Ok(Turn { native: message.clone(), text, reasoning, tool_calls })
+    Ok(Turn { native: vec![message.clone()], text, reasoning, tool_calls })
 }
 
 pub fn tool_result_messages(results: &[ToolResult]) -> Vec<Value> {

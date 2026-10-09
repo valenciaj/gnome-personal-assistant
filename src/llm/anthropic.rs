@@ -93,7 +93,7 @@ fn parse_response(response: Value) -> Result<Turn> {
 
     // El contenido se guarda íntegro (thinking, fallback…) para reenviarlo sin cambios.
     Ok(Turn {
-        native: json!({ "role": "assistant", "content": content }),
+        native: vec![json!({ "role": "assistant", "content": content })],
         text,
         reasoning,
         tool_calls,
