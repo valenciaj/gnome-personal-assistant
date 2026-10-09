@@ -1,6 +1,9 @@
 mod app;
 mod audio;
 mod config;
+mod dev;
+mod conversation_view;
+mod explorer;
 mod llm;
 mod markdown;
 mod popup;
@@ -28,6 +31,7 @@ Si ya está en marcha, las órdenes se envían a esa instancia:
   toggle    Empezar o parar una grabación
   new       Abrir el popup para escribir
   reopen    Mostrar la última conversación
+  explorer  Abrir la ventana de notas, tareas e historial
   open ID   Abrir una conversación del historial para seguirla
   quit      Cerrar el asistente
   history   Listar las conversaciones guardadas
@@ -60,10 +64,11 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::FAILURE;
     }
 
-    let app = adw::Application::builder()
-        .application_id(config::APP_ID)
-        .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
-        .build();
+    let mut flags = gio::ApplicationFlags::HANDLES_COMMAND_LINE;
+    if dev::enabled() {
+        flags |= gio::ApplicationFlags::NON_UNIQUE;
+    }
+    let app = adw::Application::builder().application_id(config::APP_ID).flags(flags).build();
 
     let (sender, receiver) = async_channel::unbounded::<Command>();
     let controller: Rc<OnceCell<Rc<Controller>>> = Rc::default();
@@ -84,11 +89,12 @@ fn main() -> glib::ExitCode {
         let args = cmdline.arguments();
         let command = args.get(1).map(|a| a.to_string_lossy().into_owned());
         let command = match command.as_deref() {
-            None if cmdline.is_remote() => Some(Command::Reopen),
+            None if cmdline.is_remote() => Some(Command::ShowExplorer),
             None => None,
             Some("toggle") => Some(Command::ToggleRecording),
             Some("new") => Some(Command::NewTextConversation),
             Some("reopen") => Some(Command::Reopen),
+            Some("explorer") => Some(Command::ShowExplorer),
             Some("quit") => Some(Command::Quit),
             Some("open") => match args.get(2).and_then(|id| id.to_str()?.parse().ok()) {
                 Some(id) => Some(Command::OpenConversation(id)),
@@ -116,6 +122,7 @@ fn add_actions(app: &adw::Application, sender: &async_channel::Sender<Command>) 
         ("toggle", Command::ToggleRecording),
         ("new", Command::NewTextConversation),
         ("reopen", Command::Reopen),
+        ("explorer", Command::ShowExplorer),
         ("quit", Command::Quit),
     ];
     for (name, command) in actions {
@@ -130,7 +137,7 @@ fn add_actions(app: &adw::Application, sender: &async_channel::Sender<Command>) 
 
 fn load_css() {
     let provider = gtk::CssProvider::new();
-    provider.load_from_string(popup::CSS);
+    provider.load_from_string(conversation_view::CSS);
     if let Some(display) = gtk::gdk::Display::default() {
         gtk::style_context_add_provider_for_display(
             &display,

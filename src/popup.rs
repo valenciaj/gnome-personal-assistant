@@ -1,33 +1,16 @@
 //! Ventana rápida de conversación: transcripción, razonamiento y respuesta.
 
+use std::rc::Rc;
+
 use adw::prelude::*;
 use gtk::glib;
 
 use crate::app::Command;
-use crate::llm::DisplayItem;
-use crate::markdown;
-use crate::store::{MessageKind, MessageRecord};
-
-pub const CSS: &str = "
-.user-bubble {
-    background: alpha(@accent_bg_color, 0.15);
-    border-radius: 12px;
-    padding: 8px 12px;
-}
-.assistant-text { padding: 0 4px; }
-.reasoning-text { padding: 4px 8px; }
-.tool-call {
-    border-radius: 8px;
-    padding: 6px 10px;
-    background: alpha(@card_fg_color, 0.06);
-}
-.confirmation { padding: 12px; }
-";
+use crate::conversation_view::{ConversationView, wrapped_label};
 
 pub struct Popup {
     window: adw::Window,
-    messages: gtk::Box,
-    scroller: gtk::ScrolledWindow,
+    view: ConversationView,
     status: gtk::Box,
     status_label: gtk::Label,
     entry: gtk::Entry,
@@ -51,20 +34,13 @@ impl Popup {
             .tooltip_text("Nueva conversación")
             .build();
         header.pack_start(&new_button);
+        let explorer_button = gtk::Button::builder()
+            .icon_name("view-list-bullet-symbolic")
+            .tooltip_text("Notas, tareas e historial")
+            .build();
+        header.pack_end(&explorer_button);
 
-        let messages = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(12)
-            .margin_top(12)
-            .margin_bottom(12)
-            .margin_start(12)
-            .margin_end(12)
-            .build();
-        let scroller = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vexpand(true)
-            .child(&messages)
-            .build();
+        let view = ConversationView::new();
 
         let status_label = gtk::Label::new(None);
         status_label.add_css_class("dim-label");
@@ -86,7 +62,7 @@ impl Popup {
             .tooltip_text("Grabar")
             .build();
         let send = gtk::Button::builder()
-            .icon_name("paper-plane-symbolic")
+            .icon_name("mail-send-symbolic")
             .tooltip_text("Enviar")
             .css_classes(["suggested-action"])
             .build();
@@ -102,7 +78,7 @@ impl Popup {
         input.append(&send);
 
         let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        body.append(&scroller);
+        body.append(view.widget());
         body.append(&status);
         body.append(&input);
 
@@ -145,17 +121,26 @@ impl Popup {
             move |_| submit()
         });
         send.connect_clicked(move |_| submit());
-        mic.connect_clicked({
+        for (button, command) in [
+            (&mic, Command::TogglePopupRecording),
+            (&new_button, Command::NewTextConversation),
+            (&explorer_button, Command::ShowExplorer),
+        ] {
             let commands = commands.clone();
-            move |_| {
-                let _ = commands.try_send(Command::TogglePopupRecording);
-            }
-        });
-        new_button.connect_clicked(move |_| {
-            let _ = commands.try_send(Command::NewTextConversation);
-        });
+            button.connect_clicked(move |_| {
+                let _ = commands.try_send(command.clone());
+            });
+        }
 
-        Self { window, messages, scroller, status, status_label, entry, mic, send }
+        Self { window, view, status, status_label, entry, mic, send }
+    }
+
+    pub fn window(&self) -> &adw::Window {
+        &self.window
+    }
+
+    pub fn view(&self) -> &ConversationView {
+        &self.view
     }
 
     /// Muestra la ventana. Con el token de activación del atajo, GNOME le da el foco.
@@ -163,80 +148,14 @@ impl Popup {
         if let Some(token) = activation_token {
             self.window.set_startup_id(token);
         }
+        // Dar el foco a la entrada antes de mostrar evita que GTK enfoque (y
+        // seleccione entero) el primer mensaje.
+        GtkWindowExt::set_focus(&self.window, Some(&self.entry));
         self.window.present();
-        self.entry.grab_focus();
     }
 
     pub fn is_active(&self) -> bool {
         self.window.is_visible() && self.window.is_active()
-    }
-
-    pub fn clear(&self) {
-        while let Some(child) = self.messages.first_child() {
-            self.messages.remove(&child);
-        }
-    }
-
-    pub fn add_user(&self, text: &str) {
-        let label = wrapped_label();
-        label.set_text(text);
-        label.add_css_class("user-bubble");
-        label.set_halign(gtk::Align::End);
-        self.append(&label);
-    }
-
-    pub fn add_items(&self, items: &[DisplayItem]) {
-        for item in items {
-            match item {
-                DisplayItem::Reasoning(text) => {
-                    let label = wrapped_label();
-                    label.set_text(text);
-                    label.add_css_class("dim-label");
-                    label.add_css_class("reasoning-text");
-                    let expander = gtk::Expander::builder()
-                        .label("Razonamiento")
-                        .child(&label)
-                        .build();
-                    expander.add_css_class("dim-label");
-                    self.append(&expander);
-                }
-                DisplayItem::Text(text) => {
-                    let label = wrapped_label();
-                    label.set_markup(&markdown::to_pango(text));
-                    label.add_css_class("assistant-text");
-                    self.append(&label);
-                }
-                DisplayItem::Tool(result) => {
-                    self.add_tool(&result.summary, &result.content, result.is_error);
-                }
-            }
-        }
-    }
-
-    /// Reconstruye un mensaje guardado en el historial.
-    pub fn add_record(&self, record: &MessageRecord) {
-        match record.kind {
-            MessageKind::User => self.add_user(&record.content),
-            MessageKind::Reasoning => self.add_items(&[DisplayItem::Reasoning(record.content.clone())]),
-            MessageKind::Text => self.add_items(&[DisplayItem::Text(record.content.clone())]),
-            MessageKind::Tool => {
-                self.add_tool(&record.content, record.tool_output.as_deref().unwrap_or_default(), record.is_error)
-            }
-            MessageKind::Error => self.add_error(&record.content),
-        }
-    }
-
-    fn add_tool(&self, summary: &str, detail: &str, is_error: bool) {
-        let label = wrapped_label();
-        let icon = if is_error { "⚠" } else { "✓" };
-        label.set_text(&format!("{icon} {summary}"));
-        label.set_tooltip_text(Some(detail));
-        label.add_css_class("tool-call");
-        label.add_css_class("caption");
-        if is_error {
-            label.add_css_class("error");
-        }
-        self.append(&label);
     }
 
     /// Pregunta si se borra algo; la respuesta vuelve a la tool por `reply`.
@@ -256,11 +175,11 @@ impl Popup {
         card.add_css_class("confirmation");
         card.append(&label);
         card.append(&buttons);
-        self.append(&card);
+        self.view.append(&card);
         self.set_status(Some("Esperando confirmación…"));
         delete.grab_focus();
 
-        let answer = {
+        let answer = Rc::new({
             let status = self.status_label.clone();
             move |confirmed: bool| {
                 let _ = reply.try_send(confirmed);
@@ -273,20 +192,12 @@ impl Popup {
                 card.append(&result);
                 status.set_text("Pensando…");
             }
-        };
-        let answer = std::rc::Rc::new(answer);
+        });
         delete.connect_clicked({
             let answer = answer.clone();
             move |_| answer(true)
         });
         cancel.connect_clicked(move |_| answer(false));
-    }
-
-    pub fn add_error(&self, message: &str) {
-        let label = wrapped_label();
-        label.set_text(message);
-        label.add_css_class("error");
-        self.append(&label);
     }
 
     /// `Some(texto)` muestra el indicador de actividad y bloquea la entrada.
@@ -309,21 +220,4 @@ impl Popup {
             self.mic.remove_css_class("destructive-action");
         }
     }
-
-    fn append(&self, widget: &impl IsA<gtk::Widget>) {
-        self.messages.append(widget);
-        // Bajar al final cuando GTK haya calculado el nuevo tamaño.
-        let adjustment = self.scroller.vadjustment();
-        glib::idle_add_local_once(move || adjustment.set_value(adjustment.upper()));
-    }
-}
-
-fn wrapped_label() -> gtk::Label {
-    gtk::Label::builder()
-        .wrap(true)
-        .wrap_mode(gtk::pango::WrapMode::WordChar)
-        .xalign(0.0)
-        .halign(gtk::Align::Fill)
-        .selectable(true)
-        .build()
 }

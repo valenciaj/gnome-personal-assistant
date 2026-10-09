@@ -317,7 +317,7 @@ fn local_time(unix: i64) -> String {
 }
 
 /// 'YYYY-MM-DD HH:MM' en hora local → unix.
-fn parse_reminder(text: &str) -> Result<i64> {
+pub(crate) fn parse_reminder(text: &str) -> Result<i64> {
     let normalized = crate::store::normalize_due(text)?;
     let naive = chrono::NaiveDateTime::parse_from_str(&normalized, "%Y-%m-%d %H:%M")
         .map_err(|_| anyhow!("El recordatorio necesita fecha y hora (YYYY-MM-DD HH:MM)"))?;

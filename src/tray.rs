@@ -36,7 +36,7 @@ impl ksni::Tray for AppTray {
         match self.state {
             TrayState::Idle => "audio-input-microphone-symbolic",
             TrayState::Recording => "media-record-symbolic",
-            TrayState::Busy => "content-loading-symbolic",
+            TrayState::Busy => "process-working-symbolic",
             TrayState::Error => "dialog-warning-symbolic",
         }
         .into()
@@ -79,7 +79,8 @@ impl ksni::Tray for AppTray {
         vec![
             record,
             item("Escribir…", "document-edit-symbolic", Command::NewTextConversation),
-            item("Última conversación", "view-conversation-balloon-symbolic", Command::Reopen),
+            item("Última conversación", "user-available-symbolic", Command::Reopen),
+            item("Notas, tareas e historial…", "view-list-bullet-symbolic", Command::ShowExplorer),
             ksni::MenuItem::Separator,
             item("Configurar atajos…", "preferences-desktop-keyboard-shortcuts-symbolic", Command::ConfigureShortcuts),
             item("Salir", "application-exit-symbolic", Command::Quit),

@@ -29,6 +29,7 @@ gnome-personal-assistant models   # modelos disponibles del proveedor activo
 gnome-personal-assistant toggle   # grabar / parar (útil en atajos personalizados)
 gnome-personal-assistant history  # conversaciones guardadas
 gnome-personal-assistant open 12  # reabrir y continuar la conversación 12
+gnome-personal-assistant explorer # ventana de notas, tareas e historial
 gnome-personal-assistant quit
 ```
 
@@ -38,3 +39,12 @@ gnome-personal-assistant quit
 grabaciones en `audio/`. Qué audios se conservan lo decide `[audio]` en la
 configuración: `retention = "with_notes"` (solo los adjuntos a notas) o `"always"`,
 y `delete_after_days` para el historial (los de notas no se borran nunca).
+
+## Modo desarrollo
+
+```sh
+ASSISTANT_DEV=1 cargo run                    # instancia aparte, sin bandeja ni atajos
+ASSISTANT_SNAPSHOT=/tmp/shots cargo run      # capturas PNG del explorador y el popup
+```
+
+Combínalos con `XDG_DATA_HOME`/`XDG_CONFIG_HOME` para usar datos de prueba.
