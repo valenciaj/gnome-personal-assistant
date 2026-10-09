@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use serde_json::{Value, json};
 
 use super::{Client, ToolCall, ToolResult, ToolSpec, Turn, json_response, openai};
+use crate::i18n::trf;
 
 pub async fn complete(
     client: &Client,
@@ -36,7 +37,7 @@ pub async fn complete(
         .await?;
     let response = json_response(response).await?;
     let Some(message) = response.get("message") else {
-        bail!("Respuesta sin mensaje: {response}");
+        bail!(trf("Respuesta sin mensaje: {response}", &[("response", &response)]));
     };
 
     let text = message["content"].as_str().unwrap_or_default().to_owned();

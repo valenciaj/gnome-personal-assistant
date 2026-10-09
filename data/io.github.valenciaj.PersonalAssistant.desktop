@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Personal Assistant
+Name[es]=Asistente personal
+Comment=Voice assistant with notes and task lists
+Comment[es]=Asistente por voz con notas y listas de tareas
+Keywords=voice;assistant;notes;tasks;todo;AI;
+Keywords[es]=voz;asistente;notas;tareas;IA;
+Exec=gnome-personal-assistant
+Icon=io.github.valenciaj.PersonalAssistant
+Terminal=false
+Categories=Utility;
+StartupNotify=true
+X-GNOME-UsesNotifications=true

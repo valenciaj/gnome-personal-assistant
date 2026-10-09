@@ -25,6 +25,7 @@ use crate::shortcuts::Shortcuts;
 use crate::store::{MessageKind, MessageRecord, Store};
 use crate::tools::{self, Toolbox, TurnContext};
 use crate::tray::{self, TrayHandle, TrayState};
+use crate::i18n::{tr, trf};
 
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -50,6 +51,9 @@ pub enum Command {
     ShowPreferences,
     /// Se ha guardado la configuración desde las preferencias.
     ConfigChanged,
+    /// Botones de la notificación de un recordatorio.
+    TodoDone(i64),
+    TodoSnooze(i64),
     RecordingFailed(String),
     /// Una tool quiere borrar algo y espera la respuesta del usuario.
     ConfirmDeletion { question: String, reply: async_channel::Sender<bool> },
@@ -187,6 +191,19 @@ impl Controller {
             this.take_snapshots(dir);
         }
 
+        if !crate::dev::enabled() {
+            this.first_run();
+        }
+        this.check_reminders();
+        let weak = Rc::downgrade(&this);
+        glib::timeout_add_seconds_local(30, move || match weak.upgrade() {
+            Some(this) => {
+                this.check_reminders();
+                glib::ControlFlow::Continue
+            }
+            None => glib::ControlFlow::Break,
+        });
+
         this.clean_audio();
         let weak = Rc::downgrade(&this);
         glib::timeout_add_seconds_local(6 * 3600, move || match weak.upgrade() {
@@ -210,8 +227,11 @@ impl Controller {
             Ok(Err(err)) => {
                 log::error!("Atajos globales no disponibles: {err:#}");
                 self.notify(
-                    "Atajos de teclado no disponibles",
-                    &format!("{err:#}. Puedes usar «gnome-personal-assistant toggle» en un atajo personalizado de GNOME."),
+                    &tr("Atajos de teclado no disponibles"),
+                    &trf(
+                        "{error}. Puedes usar «gnome-personal-assistant toggle» en un atajo personalizado de GNOME.",
+                        &[("error", &format!("{err:#}"))],
+                    ),
                 );
             }
             Err(err) => log::error!("{err}"),
@@ -240,6 +260,21 @@ impl Controller {
             Command::AutoStop | Command::StopRecording => self.stop_recording(),
             Command::CancelRecording => self.cancel_recording(),
             Command::ConfigChanged => self.reload_config(),
+            Command::TodoDone(id) => {
+                self.app.withdraw_notification(&format!("todo-{id}"));
+                if let Err(err) = self.store.set_todo_done(id, true) {
+                    log::error!("{err:#}");
+                }
+                self.refresh_explorer();
+            }
+            Command::TodoSnooze(id) => {
+                self.app.withdraw_notification(&format!("todo-{id}"));
+                let until = chrono::Utc::now().timestamp() + 600;
+                if let Err(err) = self.store.snooze_todo(id, until) {
+                    log::error!("{err:#}");
+                }
+                self.refresh_explorer();
+            }
             Command::ShowPreferences => {
                 let parent = self.explorer.borrow().as_ref().map(|e| e.window().clone().upcast::<gtk::Widget>());
                 let parent = parent.filter(|w| w.is_visible());
@@ -443,7 +478,7 @@ impl Controller {
             self.popup.view().clear();
         }
         self.present_popup();
-        self.popup.set_status(Some("Transcribiendo…"));
+        self.popup.set_status(Some(&tr("Transcribiendo…")));
 
         glib::spawn_future_local(glib::clone!(
             #[strong(rename_to = this)]
@@ -452,7 +487,7 @@ impl Controller {
                 match this.transcribe(recording.recorder).await {
                     Ok((text, path)) if text.is_empty() => {
                         let _ = std::fs::remove_file(path);
-                        this.fail("No se ha detectado voz en la grabación");
+                        this.fail(&tr("No se ha detectado voz en la grabación"));
                     }
                     Ok((text, path)) => this.ask(text, Some(path)).await,
                     Err(err) => this.fail(&format!("{err:#}")),
@@ -490,7 +525,7 @@ impl Controller {
             .filter(|_| config.audio.retention == AudioRetention::Always)
             .map(|p| p.to_string_lossy().into_owned());
         self.popup.view().add_user(&text, kept_audio.as_deref());
-        self.popup.set_status(Some("Pensando…"));
+        self.popup.set_status(Some(&tr("Pensando…")));
 
         let outcome = self.run_turn(&config, &text, audio.as_deref()).await;
         let outcome = outcome.unwrap_or_else(|err| TurnOutcome { audio_used: false, error: Some(format!("{err:#}")) });
@@ -506,9 +541,7 @@ impl Controller {
             Some(error) => self.fail(&error),
         }
         // La IA puede haber cambiado notas o tareas.
-        if let Some(explorer) = self.explorer.borrow().clone() {
-            explorer.refresh();
-        }
+        self.refresh_explorer();
     }
 
     async fn run_turn(&self, config: &Config, text: &str, audio: Option<&Path>) -> anyhow::Result<TurnOutcome> {
@@ -577,7 +610,7 @@ impl Controller {
                 conversation.messages = messages;
                 self.store.save_native(id, &conversation.messages)?;
                 if let Some(DisplayItem::Text(answer)) = items.iter().rev().find(|i| matches!(i, DisplayItem::Text(_))) {
-                    self.notify("Asistente", answer);
+                    self.notify(&tr("Asistente"), answer);
                 }
                 None
             }
@@ -601,7 +634,7 @@ impl Controller {
         self.present_popup();
 
         let provider = LlmProvider::from_id(&info.provider)
-            .ok_or_else(|| anyhow::anyhow!("Proveedor desconocido: {}", info.provider))?;
+            .ok_or_else(|| anyhow::anyhow!(trf("Proveedor desconocido: {provider}", &[("provider", &info.provider)])))?;
         // Se continúa con el proveedor y el modelo con los que empezó.
         let client = llm::Client::new(&self.config.borrow().llm, provider, Some(&info.model))?;
         *self.conversation.borrow_mut() =
@@ -687,6 +720,65 @@ impl Controller {
         crate::dev::run_steps(Duration::from_millis(1200), steps);
     }
 
+    fn refresh_explorer(&self) {
+        if let Some(explorer) = self.explorer.borrow().clone() {
+            explorer.refresh();
+        }
+    }
+
+    /// En el primer arranque se activa el inicio automático con la sesión.
+    fn first_run(&self) {
+        if self.config.borrow().first_run_done {
+            return;
+        }
+        if let Err(err) = crate::autostart::set_enabled(true) {
+            log::warn!("No se pudo activar el arranque automático: {err:#}");
+        }
+        let mut config = self.config.borrow_mut();
+        config.first_run_done = true;
+        if let Err(err) = config.save() {
+            log::warn!("{err:#}");
+        }
+    }
+
+    /// Notifica las tareas cuyo aviso ha llegado.
+    fn check_reminders(&self) {
+        let (enabled, default_time) = {
+            let r = &self.config.borrow().reminders;
+            (r.enabled, crate::reminders::parse_default_time(&r.default_time))
+        };
+        if !enabled {
+            return;
+        }
+        let todos = match self.store.todos_to_remind() {
+            Ok(todos) => todos,
+            Err(err) => return log::error!("Recordatorios: {err:#}"),
+        };
+        let now = chrono::Utc::now().timestamp();
+        for todo in todos {
+            let Some(at) = crate::reminders::reminder_time(&todo, default_time) else { continue };
+            if at > now {
+                continue;
+            }
+            if now - at <= crate::reminders::MAX_LATE_SECONDS {
+                let notification = gio::Notification::new(&tr("Recordatorio"));
+                let mut body = todo.text.clone();
+                if let Some(due) = &todo.due {
+                    body.push_str(&format!("\n{} · {due}", todo.list));
+                }
+                notification.set_body(Some(&body));
+                notification.set_priority(gio::NotificationPriority::High);
+                notification.set_default_action("app.explorer");
+                notification.add_button_with_target_value(&tr("Hecho"), "app.todo-done", Some(&todo.id.to_variant()));
+                notification.add_button_with_target_value(&tr("Posponer 10 min"), "app.todo-snooze", Some(&todo.id.to_variant()));
+                self.app.send_notification(Some(&format!("todo-{}", todo.id)), &notification);
+            }
+            if let Err(err) = self.store.mark_reminded(todo.id) {
+                log::error!("{err:#}");
+            }
+        }
+    }
+
     /// Borra los audios que no se van a usar: huérfanos de más de una hora y, si se
     /// ha configurado, los del historial con más de N días. Los de notas nunca.
     fn clean_audio(&self) {
@@ -717,7 +809,7 @@ impl Controller {
             audio::play(Sound::Error);
         }
         self.popup.view().add_error(message);
-        self.notify("Error del asistente", message);
+        self.notify(&tr("Error del asistente"), message);
         self.finish(TrayState::Error);
     }
 

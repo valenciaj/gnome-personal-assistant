@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9141ac"/>
+      <stop offset="1" stop-color="#613583"/>
+    </linearGradient>
+    <linearGradient id="mic" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#deddda"/>
+    </linearGradient>
+  </defs>
+  <!-- Bocadillo -->
+  <path d="M24 12h80a16 16 0 0 1 16 16v56a16 16 0 0 1-16 16H58l-22 18v-18H24A16 16 0 0 1 8 84V28a16 16 0 0 1 16-16z"
+        fill="url(#bg)"/>
+  <path d="M24 96h12v4H24A16 16 0 0 1 8 84v-4a16 16 0 0 0 16 16z" fill="#000" opacity="0.15"/>
+  <!-- Micrófono -->
+  <rect x="52" y="24" width="24" height="44" rx="12" fill="url(#mic)"/>
+  <path d="M42 54a22 22 0 0 0 44 0" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round"/>
+  <path d="M64 76v10M52 88h24" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round"/>
+</svg>

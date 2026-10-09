@@ -10,6 +10,8 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::i18n::{tr, trf};
+
 /// Cada entrada lleva el esquema de la versión N-1 a la N (PRAGMA user_version).
 const MIGRATIONS: &[&str] = &[r#"
 CREATE TABLE notebooks (
@@ -131,7 +133,7 @@ impl Priority {
             "low" | "baja" => Self::Low,
             "medium" | "media" => Self::Medium,
             "high" | "alta" => Self::High,
-            other => bail!("Prioridad desconocida: {other} (usa high, medium, low o none)"),
+            other => bail!(trf("Prioridad desconocida: {value} (usa high, medium, low o none)", &[("value", &other)])),
         })
     }
 }
@@ -338,7 +340,7 @@ impl Store {
             std::fs::create_dir_all(dir)?;
         }
         let conn = Connection::open(path)
-            .with_context(|| format!("No se pudo abrir {}", path.display()))?;
+            .with_context(|| trf("No se pudo abrir {path}", &[("path", &path.display())]))?;
         Self::init(conn)
     }
 
@@ -378,30 +380,30 @@ impl Store {
     }
 
     pub fn create_notebook(&self, name: &str) -> Result<i64> {
-        let name = non_empty(name, "El cuaderno necesita un nombre")?;
+        let name = non_empty(name, &tr("El cuaderno necesita un nombre"))?;
         let conn = self.conn();
         conn.execute("INSERT INTO notebooks (name, created) VALUES (?1, ?2)", params![name, now()])
-            .with_context(|| format!("Ya existe un cuaderno llamado «{name}»"))?;
+            .with_context(|| trf("Ya existe un cuaderno llamado «{name}»", &[("name", &name)]))?;
         Ok(conn.last_insert_rowid())
     }
 
     pub fn rename_notebook(&self, id: i64, name: &str) -> Result<()> {
-        let name = non_empty(name, "El cuaderno necesita un nombre")?;
+        let name = non_empty(name, &tr("El cuaderno necesita un nombre"))?;
         let changed = self.conn().execute("UPDATE notebooks SET name = ?1 WHERE id = ?2", params![name, id])?;
-        expect_changed(changed, "cuaderno", id)
+        expect_changed(changed, Kind::Notebook, id)
     }
 
     /// Borra el cuaderno; sus notas quedan sin cuaderno.
     pub fn delete_notebook(&self, id: i64) -> Result<()> {
         let changed = self.conn().execute("DELETE FROM notebooks WHERE id = ?1", [id])?;
-        expect_changed(changed, "cuaderno", id)
+        expect_changed(changed, Kind::Notebook, id)
     }
 
     pub fn notebook_name(&self, id: i64) -> Result<String> {
         self.conn()
             .query_row("SELECT name FROM notebooks WHERE id = ?1", [id], |r| r.get(0))
             .optional()?
-            .with_context(|| format!("No existe el cuaderno {id}"))
+            .with_context(|| missing(Kind::Notebook, id))
     }
 
     fn notebook_id_or_create(conn: &Connection, name: &str) -> Result<i64> {
@@ -418,7 +420,7 @@ impl Store {
     // ── Notas ──────────────────────────────────────────────────────────────
 
     pub fn create_note(&self, note: NewNote) -> Result<i64> {
-        let title = non_empty(&note.title, "La nota necesita un título")?;
+        let title = non_empty(&note.title, &tr("La nota necesita un título"))?;
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let notebook_id = match note.notebook.as_deref().map(str::trim) {
@@ -461,7 +463,7 @@ impl Store {
                 },
             )
             .optional()?
-            .with_context(|| format!("No existe la nota {id}"))?;
+            .with_context(|| missing(Kind::Note, id))?;
         Ok(Note { tags: Self::note_tags(&conn, id)?, ..note })
     }
 
@@ -470,10 +472,10 @@ impl Store {
         let tx = conn.transaction()?;
         let exists: bool = tx.query_row("SELECT count(*) FROM notes WHERE id = ?1", [id], |r| r.get::<_, i64>(0))? > 0;
         if !exists {
-            bail!("No existe la nota {id}");
+            bail!(missing(Kind::Note, id));
         }
         if let Some(title) = update.title {
-            tx.execute("UPDATE notes SET title = ?1 WHERE id = ?2", params![non_empty(&title, "El título no puede estar vacío")?, id])?;
+            tx.execute("UPDATE notes SET title = ?1 WHERE id = ?2", params![non_empty(&title, &tr("El título no puede estar vacío"))?, id])?;
         }
         if let Some(content) = update.content {
             tx.execute("UPDATE notes SET content = ?1 WHERE id = ?2", params![content, id])?;
@@ -506,7 +508,7 @@ impl Store {
         let audio: Option<Option<String>> = conn
             .query_row("SELECT audio_path FROM notes WHERE id = ?1", [id], |r| r.get(0))
             .optional()?;
-        let Some(audio) = audio else { bail!("No existe la nota {id}") };
+        let Some(audio) = audio else { bail!(missing(Kind::Note, id)) };
         conn.execute("DELETE FROM notes WHERE id = ?1", [id])?;
         conn.execute("DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM note_tags)", [])?;
         Ok(audio)
@@ -602,30 +604,30 @@ impl Store {
     }
 
     pub fn create_todo_list(&self, name: &str) -> Result<i64> {
-        let name = non_empty(name, "La lista necesita un nombre")?;
+        let name = non_empty(name, &tr("La lista necesita un nombre"))?;
         let conn = self.conn();
         conn.execute("INSERT INTO todo_lists (name, created) VALUES (?1, ?2)", params![name, now()])
-            .with_context(|| format!("Ya existe una lista llamada «{name}»"))?;
+            .with_context(|| trf("Ya existe una lista llamada «{name}»", &[("name", &name)]))?;
         Ok(conn.last_insert_rowid())
     }
 
     pub fn rename_todo_list(&self, id: i64, name: &str) -> Result<()> {
-        let name = non_empty(name, "La lista necesita un nombre")?;
+        let name = non_empty(name, &tr("La lista necesita un nombre"))?;
         let changed = self.conn().execute("UPDATE todo_lists SET name = ?1 WHERE id = ?2", params![name, id])?;
-        expect_changed(changed, "lista", id)
+        expect_changed(changed, Kind::List, id)
     }
 
     /// Borra la lista con todas sus tareas.
     pub fn delete_todo_list(&self, id: i64) -> Result<()> {
         let changed = self.conn().execute("DELETE FROM todo_lists WHERE id = ?1", [id])?;
-        expect_changed(changed, "lista", id)
+        expect_changed(changed, Kind::List, id)
     }
 
     pub fn todo_list(&self, id: i64) -> Result<TodoList> {
         self.list_todo_lists()?
             .into_iter()
             .find(|l| l.id == id)
-            .with_context(|| format!("No existe la lista {id}"))
+            .with_context(|| missing(Kind::List, id))
     }
 
     fn list_id_or_create(conn: &Connection, name: &str) -> Result<i64> {
@@ -643,8 +645,8 @@ impl Store {
 
     /// Añade una tarea; si la lista no existe, la crea.
     pub fn add_todo(&self, todo: NewTodo) -> Result<i64> {
-        let text = non_empty(&todo.text, "La tarea necesita un texto")?;
-        let list = non_empty(&todo.list, "Indica la lista de la tarea")?;
+        let text = non_empty(&todo.text, &tr("La tarea necesita un texto"))?;
+        let list = non_empty(&todo.list, &tr("Indica la lista de la tarea"))?;
         let due = todo.due.as_deref().map(normalize_due).transpose()?;
         let mut conn = self.conn();
         let tx = conn.transaction()?;
@@ -662,7 +664,7 @@ impl Store {
         let conn = self.conn();
         conn.query_row(&format!("{TODO_SELECT} WHERE t.id = ?1"), [id], todo_from_row)
             .optional()?
-            .with_context(|| format!("No existe la tarea {id}"))
+            .with_context(|| missing(Kind::Todo, id))
     }
 
     pub fn update_todo(&self, id: i64, update: TodoUpdate) -> Result<()> {
@@ -670,14 +672,15 @@ impl Store {
         let tx = conn.transaction()?;
         let exists: bool = tx.query_row("SELECT count(*) FROM todos WHERE id = ?1", [id], |r| r.get::<_, i64>(0))? > 0;
         if !exists {
-            bail!("No existe la tarea {id}");
+            bail!(missing(Kind::Todo, id));
         }
         if let Some(text) = update.text {
-            tx.execute("UPDATE todos SET text = ?1 WHERE id = ?2", params![non_empty(&text, "El texto no puede estar vacío")?, id])?;
+            tx.execute("UPDATE todos SET text = ?1 WHERE id = ?2", params![non_empty(&text, &tr("El texto no puede estar vacío"))?, id])?;
         }
         if let Some(due) = update.due {
             let due = due.as_deref().map(normalize_due).transpose()?;
-            tx.execute("UPDATE todos SET due = ?1 WHERE id = ?2", params![due, id])?;
+            // Con fecha nueva, el aviso derivado de ella vuelve a estar pendiente.
+            tx.execute("UPDATE todos SET due = ?1, reminded = 0 WHERE id = ?2", params![due, id])?;
         }
         if let Some(priority) = update.priority {
             tx.execute("UPDATE todos SET priority = ?1 WHERE id = ?2", params![priority.to_db(), id])?;
@@ -686,7 +689,7 @@ impl Store {
             tx.execute("UPDATE todos SET reminder_at = ?1, reminded = 0 WHERE id = ?2", params![reminder, id])?;
         }
         if let Some(list) = update.list {
-            let list_id = Self::list_id_or_create(&tx, non_empty(&list, "Indica la lista")?)?;
+            let list_id = Self::list_id_or_create(&tx, non_empty(&list, &tr("Indica la lista"))?)?;
             tx.execute("UPDATE todos SET list_id = ?1 WHERE id = ?2", params![list_id, id])?;
         }
         tx.commit()?;
@@ -699,12 +702,34 @@ impl Store {
             "UPDATE todos SET done = ?1, completed = ?2 WHERE id = ?3",
             params![done, completed, id],
         )?;
-        expect_changed(changed, "tarea", id)
+        expect_changed(changed, Kind::Todo, id)
+    }
+
+    /// Tareas pendientes con fecha o aviso cuyo recordatorio aún no se ha mostrado.
+    pub fn todos_to_remind(&self) -> Result<Vec<Todo>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "{TODO_SELECT} WHERE t.done = 0 AND t.reminded = 0 AND (t.reminder_at IS NOT NULL OR t.due IS NOT NULL)"
+        ))?;
+        let rows = stmt.query_map([], todo_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn mark_reminded(&self, id: i64) -> Result<()> {
+        self.conn().execute("UPDATE todos SET reminded = 1 WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Vuelve a avisar de la tarea en `until` (unix).
+    pub fn snooze_todo(&self, id: i64, until: i64) -> Result<()> {
+        let changed =
+            self.conn().execute("UPDATE todos SET reminder_at = ?1, reminded = 0 WHERE id = ?2", params![until, id])?;
+        expect_changed(changed, Kind::Todo, id)
     }
 
     pub fn delete_todo(&self, id: i64) -> Result<()> {
         let changed = self.conn().execute("DELETE FROM todos WHERE id = ?1", [id])?;
-        expect_changed(changed, "tarea", id)
+        expect_changed(changed, Kind::Todo, id)
     }
 
     pub fn list_todos(&self, filter: &TodoFilter) -> Result<Vec<Todo>> {
@@ -806,7 +831,7 @@ impl Store {
                 },
             )
             .optional()?
-            .with_context(|| format!("No existe la conversación {id}"))?;
+            .with_context(|| missing(Kind::Conversation, id))?;
         Ok(ConversationInfo { native: serde_json::from_str(&native)?, ..info })
     }
 
@@ -854,7 +879,7 @@ impl Store {
     /// Borra la conversación y sus mensajes; las notas que salieron de ella se conservan.
     pub fn delete_conversation(&self, id: i64) -> Result<()> {
         let changed = self.conn().execute("DELETE FROM conversations WHERE id = ?1", [id])?;
-        expect_changed(changed, "conversación", id)
+        expect_changed(changed, Kind::Conversation, id)
     }
 
     // ── Audio ──────────────────────────────────────────────────────────────
@@ -911,9 +936,29 @@ fn non_empty<'a>(text: &'a str, message: &str) -> Result<&'a str> {
     Ok(text)
 }
 
-fn expect_changed(changed: usize, what: &str, id: i64) -> Result<()> {
+#[derive(Clone, Copy)]
+enum Kind {
+    Notebook,
+    Note,
+    List,
+    Todo,
+    Conversation,
+}
+
+fn missing(kind: Kind, id: i64) -> String {
+    let message = match kind {
+        Kind::Notebook => tr("No existe el cuaderno {id}"),
+        Kind::Note => tr("No existe la nota {id}"),
+        Kind::List => tr("No existe la lista {id}"),
+        Kind::Todo => tr("No existe la tarea {id}"),
+        Kind::Conversation => tr("No existe la conversación {id}"),
+    };
+    message.replace("{id}", &id.to_string())
+}
+
+fn expect_changed(changed: usize, kind: Kind, id: i64) -> Result<()> {
     if changed == 0 {
-        bail!("No existe la {what} {id}");
+        bail!(missing(kind, id));
     }
     Ok(())
 }
@@ -929,7 +974,7 @@ pub fn normalize_due(text: &str) -> Result<String> {
             return Ok(datetime.format("%Y-%m-%d %H:%M").to_string());
         }
     }
-    bail!("Fecha no válida: «{text}» (usa YYYY-MM-DD o YYYY-MM-DD HH:MM)")
+    bail!(trf("Fecha no válida: «{date}» (usa YYYY-MM-DD o YYYY-MM-DD HH:MM)", &[("date", &text)]))
 }
 
 /// Convierte texto libre en una consulta FTS5: cada palabra como prefijo, todas obligatorias.

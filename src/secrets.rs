@@ -7,6 +7,7 @@ use std::sync::{OnceLock, RwLock};
 use anyhow::{Context, Result};
 
 use crate::config::{self, APP_ID, Config, LlmProvider};
+use crate::i18n::tr;
 
 const NAME_ATTRIBUTE: &str = "key-name";
 
@@ -21,7 +22,7 @@ pub fn get(name: &str) -> Option<String> {
 
 /// Carga en la caché todas las claves de la app.
 pub async fn load() -> Result<()> {
-    let keyring = oo7::Keyring::new().await.context("No se pudo abrir el llavero")?;
+    let keyring = oo7::Keyring::new().await.with_context(|| tr("No se pudo abrir el llavero"))?;
     keyring.unlock().await?;
     let items = keyring.search_items(&[("application", APP_ID)]).await?;
     let mut loaded = HashMap::new();
@@ -41,7 +42,7 @@ pub async fn load() -> Result<()> {
 
 /// Guarda (o borra, si `value` está vacío) una clave en el llavero.
 pub async fn set(name: &str, value: &str) -> Result<()> {
-    let keyring = oo7::Keyring::new().await.context("No se pudo abrir el llavero")?;
+    let keyring = oo7::Keyring::new().await.with_context(|| tr("No se pudo abrir el llavero"))?;
     keyring.unlock().await?;
     let attributes = [("application", APP_ID), (NAME_ATTRIBUTE, name)];
     if value.is_empty() {

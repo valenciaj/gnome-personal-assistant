@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 use gst::prelude::*;
+use crate::i18n::{tr, trf};
 
 pub struct Recorder {
     pipeline: gst::Pipeline,
@@ -39,7 +40,7 @@ impl Recorder {
             path.display()
         );
         let pipeline = gst::parse::launch(&description)
-            .context("No se pudo crear el pipeline de audio")?
+            .with_context(|| tr("No se pudo crear el pipeline de audio"))?
             .downcast::<gst::Pipeline>()
             .map_err(|_| anyhow!("El pipeline de audio no es un gst::Pipeline"))?;
 
@@ -65,7 +66,7 @@ impl Recorder {
                     let _ = eos_tx.try_send(Ok(()));
                 }
                 MessageView::Error(err) => {
-                    let text = format!("Error de audio: {}", err.error());
+                    let text = trf("Error de audio: {error}", &[("error", &err.error())]);
                     log::error!("{text} ({:?})", err.debug());
                     let _ = eos_tx.try_send(Err(text.clone()));
                     on_error(text);
@@ -77,7 +78,7 @@ impl Recorder {
 
         pipeline
             .set_state(gst::State::Playing)
-            .context("No se pudo abrir el micrófono")?;
+            .with_context(|| tr("No se pudo abrir el micrófono"))?;
 
         Ok(Self {
             pipeline,
@@ -100,8 +101,8 @@ impl Recorder {
         match result {
             Ok(Ok(Ok(()))) => Ok(self.path.clone()),
             Ok(Ok(Err(err))) => Err(anyhow!(err)),
-            Ok(Err(_)) => Err(anyhow!("El pipeline de audio se cerró inesperadamente")),
-            Err(_) => Err(anyhow!("La grabación no terminó a tiempo")),
+            Ok(Err(_)) => Err(anyhow!(tr("El pipeline de audio se cerró inesperadamente"))),
+            Err(_) => Err(anyhow!(tr("La grabación no terminó a tiempo"))),
         }
     }
 

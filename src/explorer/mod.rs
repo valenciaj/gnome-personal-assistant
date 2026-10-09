@@ -11,6 +11,7 @@ use gtk::glib;
 
 use crate::app::Command;
 use crate::store::Store;
+use crate::i18n::tr;
 
 /// Lo que comparten las páginas del explorador.
 #[derive(Clone)]
@@ -45,7 +46,7 @@ impl Ctx {
     /// Diálogo de confirmación para acciones destructivas.
     pub fn confirm(&self, heading: &str, body: &str, action: &str, on_confirm: impl Fn() + 'static) {
         let dialog = adw::AlertDialog::new(Some(heading), Some(body));
-        dialog.add_response("cancel", "Cancelar");
+        dialog.add_response("cancel", &tr("Cancelar"));
         dialog.add_response("confirm", action);
         dialog.set_response_appearance("confirm", adw::ResponseAppearance::Destructive);
         dialog.set_close_response("cancel");
@@ -58,7 +59,7 @@ impl Ctx {
         let dialog = adw::AlertDialog::new(Some(heading), None);
         let entry = gtk::Entry::builder().text(initial).activates_default(true).build();
         dialog.set_extra_child(Some(&entry));
-        dialog.add_response("cancel", "Cancelar");
+        dialog.add_response("cancel", &tr("Cancelar"));
         dialog.add_response("accept", action);
         dialog.set_response_appearance("accept", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("accept"));
@@ -85,7 +86,7 @@ impl Explorer {
     pub fn new(app: &adw::Application, store: Store, commands: async_channel::Sender<Command>) -> Rc<Self> {
         let window = adw::ApplicationWindow::builder()
             .application(app)
-            .title("Asistente personal")
+            .title(tr("Asistente personal"))
             .default_width(1100)
             .default_height(720)
             .width_request(720)
@@ -100,18 +101,18 @@ impl Explorer {
         let todos = todos::Page::new(ctx.clone());
 
         let stack = adw::ViewStack::new();
-        stack.add_titled_with_icon(notes.widget(), Some("notes"), "Notas", "accessories-text-editor-symbolic");
-        stack.add_titled_with_icon(todos.widget(), Some("todos"), "Tareas", "object-select-symbolic");
+        stack.add_titled_with_icon(notes.widget(), Some("notes"), &tr("Notas"), "accessories-text-editor-symbolic");
+        stack.add_titled_with_icon(todos.widget(), Some("todos"), &tr("Tareas"), "object-select-symbolic");
         stack.add_titled_with_icon(
             conversations.widget(),
             Some("conversations"),
-            "Conversaciones",
+            &tr("Conversaciones"),
             "user-available-symbolic",
         );
 
         let switcher = adw::ViewSwitcher::builder().stack(&stack).policy(adw::ViewSwitcherPolicy::Wide).build();
         let header = adw::HeaderBar::builder().title_widget(&switcher).build();
-        let preferences = gtk::Button::builder().icon_name("preferences-system-symbolic").tooltip_text("Preferencias").build();
+        let preferences = gtk::Button::builder().icon_name("preferences-system-symbolic").tooltip_text(tr("Preferencias")).build();
         let commands = ctx.commands.clone();
         preferences.connect_clicked(move |_| {
             let _ = commands.try_send(Command::ShowPreferences);

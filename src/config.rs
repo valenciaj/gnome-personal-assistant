@@ -7,6 +7,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{n_, tr};
+
 pub const APP_ID: &str = "io.github.valenciaj.PersonalAssistant";
 const DIR_NAME: &str = "personal-assistant";
 
@@ -18,6 +20,32 @@ pub enum LlmProvider {
     Ollama,
     OpenaiCompatible,
 }
+
+const ANTHROPIC_LEVELS: &[(&str, &str)] = &[
+                ("default", n_("Por defecto del modelo")),
+                ("low", n_("Bajo")),
+                ("medium", n_("Medio")),
+                ("high", n_("Alto")),
+                ("xhigh", n_("Muy alto")),
+                ("max", n_("Máximo")),
+            ];
+const OPENAI_LEVELS: &[(&str, &str)] = &[
+                ("default", n_("Por defecto del modelo")),
+                ("none", n_("Sin razonamiento")),
+                ("minimal", n_("Mínimo")),
+                ("low", n_("Bajo")),
+                ("medium", n_("Medio")),
+                ("high", n_("Alto")),
+                ("xhigh", n_("Muy alto")),
+            ];
+const OLLAMA_LEVELS: &[(&str, &str)] = &[
+                ("default", n_("Por defecto del modelo")),
+                ("off", n_("Desactivado")),
+                ("on", n_("Activado")),
+                ("low", n_("Bajo (gpt-oss)")),
+                ("medium", n_("Medio (gpt-oss)")),
+                ("high", n_("Alto (gpt-oss)")),
+            ];
 
 impl LlmProvider {
     pub const ALL: [Self; 4] = [Self::Anthropic, Self::Openai, Self::Ollama, Self::OpenaiCompatible];
@@ -36,34 +64,12 @@ impl LlmProvider {
         Self::ALL.into_iter().find(|p| p.id() == id)
     }
 
-    /// Niveles de razonamiento que admite cada API: (valor, etiqueta).
+    /// Niveles de razonamiento que admite cada API: (valor, etiqueta sin traducir).
     pub fn reasoning_levels(self) -> &'static [(&'static str, &'static str)] {
         match self {
-            Self::Anthropic => &[
-                ("default", "Por defecto del modelo"),
-                ("low", "Bajo"),
-                ("medium", "Medio"),
-                ("high", "Alto"),
-                ("xhigh", "Muy alto"),
-                ("max", "Máximo"),
-            ],
-            Self::Openai | Self::OpenaiCompatible => &[
-                ("default", "Por defecto del modelo"),
-                ("none", "Sin razonamiento"),
-                ("minimal", "Mínimo"),
-                ("low", "Bajo"),
-                ("medium", "Medio"),
-                ("high", "Alto"),
-                ("xhigh", "Muy alto"),
-            ],
-            Self::Ollama => &[
-                ("default", "Por defecto del modelo"),
-                ("off", "Desactivado"),
-                ("on", "Activado"),
-                ("low", "Bajo (gpt-oss)"),
-                ("medium", "Medio (gpt-oss)"),
-                ("high", "Alto (gpt-oss)"),
-            ],
+            Self::Anthropic => ANTHROPIC_LEVELS,
+            Self::Openai | Self::OpenaiCompatible => OPENAI_LEVELS,
+            Self::Ollama => OLLAMA_LEVELS,
         }
     }
 
@@ -72,12 +78,12 @@ impl LlmProvider {
         format!("llm-{}", self.id())
     }
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Anthropic => "Anthropic",
-            Self::Openai => "OpenAI",
-            Self::Ollama => "Ollama",
-            Self::OpenaiCompatible => "Compatible OpenAI",
+            Self::Anthropic => "Anthropic".into(),
+            Self::Openai => "OpenAI".into(),
+            Self::Ollama => "Ollama".into(),
+            Self::OpenaiCompatible => tr("Compatible con OpenAI"),
         }
     }
 }
@@ -295,22 +301,44 @@ impl Default for AudioConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+pub struct RemindersConfig {
+    pub enabled: bool,
+    /// Hora ('HH:MM') del aviso de las tareas que solo tienen día.
+    pub default_time: String,
+}
+
+impl Default for RemindersConfig {
+    fn default() -> Self {
+        Self { enabled: true, default_time: "09:00".into() }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
+    /// Idioma de la interfaz: "auto", "es" o "en".
+    pub language: String,
+    /// Se pone a true tras el primer arranque (en el que se activa el autoarranque).
+    pub first_run_done: bool,
     pub system_prompt: String,
     pub stt: SttConfig,
     pub llm: LlmConfig,
     pub recording: RecordingConfig,
     pub audio: AudioConfig,
+    pub reminders: RemindersConfig,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
+            language: "auto".into(),
+            first_run_done: false,
             system_prompt: DEFAULT_SYSTEM_PROMPT.into(),
             stt: SttConfig::default(),
             llm: LlmConfig::default(),
             recording: RecordingConfig::default(),
             audio: AudioConfig::default(),
+            reminders: RemindersConfig::default(),
         }
     }
 }

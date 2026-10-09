@@ -1,14 +1,17 @@
 mod app;
 mod audio;
+mod autostart;
 mod config;
 mod dev;
 mod conversation_view;
 mod explorer;
+mod i18n;
 mod indicator;
 mod llm;
 mod markdown;
 mod popup;
 mod preferences;
+mod reminders;
 mod runtime;
 mod secrets;
 mod shortcuts;
@@ -24,31 +27,41 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use app::{Command, Controller};
+use i18n::{tr, trf};
 
-const USAGE: &str = "\
-Uso: gnome-personal-assistant [ORDEN]
-
-Sin orden arranca el asistente en segundo plano (icono de bandeja + atajos).
-Si ya está en marcha, las órdenes se envían a esa instancia:
-
-  toggle    Empezar o parar una grabación
-  new       Abrir el popup para escribir
-  reopen    Mostrar la última conversación
-  explorer  Abrir la ventana de notas, tareas e historial
-  preferences  Abrir las preferencias
-  open ID   Abrir una conversación del historial para seguirla
-  quit      Cerrar el asistente
-  history   Listar las conversaciones guardadas
-  models    Listar los modelos del proveedor de LLM configurado
-  config    Mostrar la ruta del archivo de configuración";
+fn usage() -> String {
+    let commands = [
+        ("toggle", tr("Empezar o parar una grabación")),
+        ("new", tr("Abrir el popup para escribir")),
+        ("reopen", tr("Mostrar la última conversación")),
+        ("explorer", tr("Abrir la ventana de notas, tareas e historial")),
+        ("preferences", tr("Abrir las preferencias")),
+        ("open ID", tr("Abrir una conversación del historial para seguirla")),
+        ("quit", tr("Cerrar el asistente")),
+        ("history", tr("Listar las conversaciones guardadas")),
+        ("models", tr("Listar los modelos del proveedor de LLM configurado")),
+        ("config", tr("Mostrar la ruta del archivo de configuración")),
+    ];
+    let mut text = format!(
+        "{}\n\n{}\n{}\n\n",
+        tr("Uso: gnome-personal-assistant [ORDEN]"),
+        tr("Sin orden arranca el asistente en segundo plano (icono de bandeja y atajos)."),
+        tr("Si ya está en marcha, las órdenes se envían a esa instancia:"),
+    );
+    for (command, description) in commands {
+        text.push_str(&format!("  {command:<12} {description}\n"));
+    }
+    text
+}
 
 fn main() -> glib::ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    i18n::init(&config::Config::load().map(|c| c.language).unwrap_or_default());
 
     // Órdenes que no necesitan la instancia gráfica.
     match std::env::args().nth(1).as_deref() {
         Some("-h" | "--help" | "help") => {
-            println!("{USAGE}");
+            println!("{}", usage());
             return glib::ExitCode::SUCCESS;
         }
         Some("models") => return list_models(),
@@ -64,7 +77,7 @@ fn main() -> glib::ExitCode {
     }
 
     if let Err(err) = gst::init() {
-        eprintln!("No se pudo iniciar GStreamer: {err}");
+        eprintln!("{}", trf("No se pudo iniciar GStreamer: {error}", &[("error", &err)]));
         return glib::ExitCode::FAILURE;
     }
 
@@ -104,12 +117,12 @@ fn main() -> glib::ExitCode {
             Some("open") => match args.get(2).and_then(|id| id.to_str()?.parse().ok()) {
                 Some(id) => Some(Command::OpenConversation(id)),
                 None => {
-                    cmdline.printerr_literal("Uso: gnome-personal-assistant open ID\n");
+                    cmdline.printerr_literal(&format!("{}\n", tr("Uso: gnome-personal-assistant open ID")));
                     return glib::ExitCode::FAILURE;
                 }
             },
             Some(other) => {
-                cmdline.printerr_literal(&format!("Orden desconocida: {other}\n\n{USAGE}\n"));
+                cmdline.printerr_literal(&format!("{}\n\n{}", trf("Orden desconocida: {command}", &[("command", &other)]), usage()));
                 return glib::ExitCode::FAILURE;
             }
         };
@@ -139,6 +152,17 @@ fn add_actions(app: &adw::Application, sender: &async_channel::Sender<Command>) 
         });
         app.add_action(&action);
     }
+    // Botones de los recordatorios: llevan el id de la tarea.
+    for (name, command) in [("todo-done", Command::TodoDone as fn(i64) -> Command), ("todo-snooze", Command::TodoSnooze)] {
+        let action = gio::SimpleAction::new(name, Some(glib::VariantTy::INT64));
+        let sender = sender.clone();
+        action.connect_activate(move |_, parameter| {
+            if let Some(id) = parameter.and_then(|p| p.get::<i64>()) {
+                let _ = sender.try_send(command(id));
+            }
+        });
+        app.add_action(&action);
+    }
 }
 
 fn load_css() {
@@ -159,7 +183,7 @@ fn list_models() -> glib::ExitCode {
             eprintln!("Llavero: {err:#}");
         }
         let client = llm::Client::from_config(&config.llm)?;
-        println!("{} (modelo actual: {})", client.provider.label(), client.model);
+        println!("{}", trf("{provider} (modelo actual: {model})", &[("provider", &client.provider.label()), ("model", &client.model)]));
         runtime::runtime().block_on(client.list_models())
     });
     match result {

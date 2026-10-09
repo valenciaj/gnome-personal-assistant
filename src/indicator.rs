@@ -12,6 +12,7 @@ use adw::prelude::*;
 use gtk::glib;
 
 use crate::app::Command;
+use crate::i18n::tr;
 
 pub struct Indicator {
     window: adw::Window,
@@ -32,13 +33,13 @@ impl Indicator {
         }
         let cancel = gtk::Button::builder()
             .icon_name("edit-delete-symbolic")
-            .tooltip_text("Descartar")
+            .tooltip_text(tr("Descartar"))
             .css_classes(["circular", "flat"])
             .valign(gtk::Align::Center)
             .build();
         let stop = gtk::Button::builder()
             .icon_name("media-playback-stop-symbolic")
-            .tooltip_text("Parar y enviar")
+            .tooltip_text(tr("Parar y enviar"))
             .css_classes(["circular", "destructive-action"])
             .valign(gtk::Align::Center)
             .build();
@@ -59,7 +60,7 @@ impl Indicator {
         let handle = gtk::WindowHandle::builder().child(&content).build();
         let window = adw::Window::builder()
             .application(app)
-            .title("Grabando")
+            .title(tr("Grabando"))
             .default_width(380)
             // AdwWindow impone por defecto un mínimo de 360×200.
             .width_request(300)

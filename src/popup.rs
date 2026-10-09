@@ -7,6 +7,7 @@ use gtk::glib;
 
 use crate::app::Command;
 use crate::conversation_view::{ConversationView, wrapped_label};
+use crate::i18n::tr;
 
 pub struct Popup {
     window: adw::Window,
@@ -22,7 +23,7 @@ impl Popup {
     pub fn new(app: &adw::Application, commands: async_channel::Sender<Command>) -> Self {
         let window = adw::Window::builder()
             .application(app)
-            .title("Asistente")
+            .title(tr("Asistente"))
             .default_width(520)
             .default_height(620)
             .hide_on_close(true)
@@ -31,12 +32,12 @@ impl Popup {
         let header = adw::HeaderBar::new();
         let new_button = gtk::Button::builder()
             .icon_name("list-add-symbolic")
-            .tooltip_text("Nueva conversación")
+            .tooltip_text(tr("Nueva conversación"))
             .build();
         header.pack_start(&new_button);
         let explorer_button = gtk::Button::builder()
             .icon_name("view-list-bullet-symbolic")
-            .tooltip_text("Notas, tareas e historial")
+            .tooltip_text(tr("Notas, tareas e historial"))
             .build();
         header.pack_end(&explorer_button);
 
@@ -54,16 +55,16 @@ impl Popup {
         status.append(&status_label);
 
         let entry = gtk::Entry::builder()
-            .placeholder_text("Escribe o pulsa el micrófono…")
+            .placeholder_text(tr("Escribe o pulsa el micrófono…"))
             .hexpand(true)
             .build();
         let mic = gtk::Button::builder()
             .icon_name("audio-input-microphone-symbolic")
-            .tooltip_text("Grabar")
+            .tooltip_text(tr("Grabar"))
             .build();
         let send = gtk::Button::builder()
             .icon_name("mail-send-symbolic")
-            .tooltip_text("Enviar")
+            .tooltip_text(tr("Enviar"))
             .css_classes(["suggested-action"])
             .build();
         let input = gtk::Box::builder()
@@ -164,8 +165,8 @@ impl Popup {
         label.set_text(question);
         label.set_selectable(false);
 
-        let cancel = gtk::Button::with_label("Cancelar");
-        let delete = gtk::Button::builder().label("Borrar").css_classes(["destructive-action"]).build();
+        let cancel = gtk::Button::with_label(&tr("Cancelar"));
+        let delete = gtk::Button::builder().label(tr("Borrar")).css_classes(["destructive-action"]).build();
         let buttons = gtk::Box::builder().spacing(6).halign(gtk::Align::End).build();
         buttons.append(&cancel);
         buttons.append(&delete);
@@ -176,7 +177,7 @@ impl Popup {
         card.append(&label);
         card.append(&buttons);
         self.view.append(&card);
-        self.set_status(Some("Esperando confirmación…"));
+        self.set_status(Some(&tr("Esperando confirmación…")));
         delete.grab_focus();
 
         let answer = Rc::new({
@@ -185,12 +186,12 @@ impl Popup {
                 let _ = reply.try_send(confirmed);
                 card.remove(&buttons);
                 let result = gtk::Label::builder()
-                    .label(if confirmed { "Borrado confirmado" } else { "Borrado cancelado" })
+                    .label(if confirmed { tr("Borrado confirmado") } else { tr("Borrado cancelado") })
                     .halign(gtk::Align::End)
                     .css_classes(["dim-label", "caption"])
                     .build();
                 card.append(&result);
-                status.set_text("Pensando…");
+                status.set_text(&tr("Pensando…"));
             }
         });
         delete.connect_clicked({
@@ -212,11 +213,11 @@ impl Popup {
     pub fn set_recording(&self, recording: bool) {
         if recording {
             self.mic.set_icon_name("media-playback-stop-symbolic");
-            self.mic.set_tooltip_text(Some("Parar y enviar"));
+            self.mic.set_tooltip_text(Some(&tr("Parar y enviar")));
             self.mic.add_css_class("destructive-action");
         } else {
             self.mic.set_icon_name("audio-input-microphone-symbolic");
-            self.mic.set_tooltip_text(Some("Grabar"));
+            self.mic.set_tooltip_text(Some(&tr("Grabar")));
             self.mic.remove_css_class("destructive-action");
         }
     }

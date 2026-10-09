@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use serde_json::{Value, json};
 
 use super::{Client, ToolCall, ToolResult, ToolSpec, Turn, json_response};
+use crate::i18n::{tr, trf};
 
 const API_VERSION: &str = "2023-06-01";
 const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
@@ -59,8 +60,8 @@ fn parse_response(response: Value) -> Result<Turn> {
             let category = response
                 .pointer("/stop_details/category")
                 .and_then(Value::as_str)
-                .unwrap_or("sin categoría");
-            bail!("El modelo ha rechazado la petición ({category})");
+                .map_or_else(|| tr("sin categoría"), str::to_owned);
+            bail!(trf("El modelo ha rechazado la petición ({category})", &[("category", &category)]));
         }
         Some("max_tokens") => log::warn!("Respuesta truncada por max_tokens"),
         _ => {}

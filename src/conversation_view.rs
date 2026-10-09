@@ -7,6 +7,7 @@ use gtk::glib;
 use crate::llm::DisplayItem;
 use crate::markdown;
 use crate::store::{MessageKind, MessageRecord};
+use crate::i18n::tr;
 
 pub const CSS: &str = "
 .user-bubble {
@@ -81,7 +82,7 @@ impl ConversationView {
                     label.set_text(text);
                     label.add_css_class("dim-label");
                     label.add_css_class("reasoning-text");
-                    let expander = gtk::Expander::builder().label("Razonamiento").child(&label).build();
+                    let expander = gtk::Expander::builder().label(tr("Razonamiento")).child(&label).build();
                     expander.add_css_class("dim-label");
                     self.append(&expander);
                 }
@@ -160,7 +161,7 @@ pub fn play_button(path: &str) -> Option<gtk::Button> {
     let media = gtk::MediaFile::for_filename(path);
     let button = gtk::Button::builder()
         .icon_name("media-playback-start-symbolic")
-        .tooltip_text("Escuchar la grabación")
+        .tooltip_text(tr("Escuchar la grabación"))
         .css_classes(["flat", "circular"])
         .build();
     media.connect_playing_notify(glib::clone!(

@@ -17,6 +17,7 @@ use crate::llm::{ToolCall, ToolExecutor, ToolOutput, ToolSpec};
 use crate::store::{
     NewNote, NewTodo, NoteFilter, NoteUpdate, Priority, Store, Todo, TodoFilter, TodoStatus, TodoUpdate,
 };
+use crate::i18n::{tr, trf};
 
 /// Se añade al prompt de sistema de cada conversación.
 pub const GUIDANCE: &str = "\
@@ -71,7 +72,7 @@ impl Toolbox {
         if !self.confirm(question).await {
             return Ok(ToolOutput::new(
                 json!({ "deleted": false, "reason": "El usuario ha cancelado el borrado" }),
-                "Borrado cancelado",
+                tr("Borrado cancelado"),
             ));
         }
         delete()?;
@@ -96,8 +97,8 @@ impl Toolbox {
                 if attach {
                     self.audio_used.store(true, Ordering::Relaxed);
                 }
-                let suffix = if attach { " (con audio)" } else { "" };
-                Ok(ToolOutput::new(json!({ "id": id, "audio_attached": attach }), format!("Nota creada: «{}»{suffix}", a.title)))
+                let suffix = if attach { tr(" (con audio)") } else { String::new() };
+                Ok(ToolOutput::new(json!({ "id": id, "audio_attached": attach }), trf("Nota creada: «{title}»{audio}", &[("title", &a.title), ("audio", &suffix)])))
             }
             "get_note" => {
                 let a: Id = args(input)?;
@@ -114,7 +115,7 @@ impl Toolbox {
                         "created": local_time(note.created),
                         "modified": local_time(note.modified),
                     }),
-                    format!("Nota leída: «{}»", note.title),
+                    trf("Nota leída: «{title}»", &[("title", &note.title)]),
                 ))
             }
             "search_notes" => {
@@ -139,7 +140,7 @@ impl Toolbox {
                         })
                     })
                     .collect();
-                Ok(ToolOutput::new(json!({ "notes": notes }), format!("Búsqueda de notas: {count} resultados")))
+                Ok(ToolOutput::new(json!({ "notes": notes }), trf("Búsqueda de notas: {count} resultados", &[("count", &count)])))
             }
             "update_note" => {
                 let a: UpdateNote = args(input)?;
@@ -148,15 +149,15 @@ impl Toolbox {
                     NoteUpdate { title: a.title, content: a.content, append: a.append, notebook: a.notebook, tags: a.tags },
                 )?;
                 let note = store.get_note(a.id)?;
-                Ok(ToolOutput::new(json!({ "updated": true }), format!("Nota actualizada: «{}»", note.title)))
+                Ok(ToolOutput::new(json!({ "updated": true }), trf("Nota actualizada: «{title}»", &[("title", &note.title)])))
             }
             "delete_note" => {
                 let a: Id = args(input)?;
                 let note = store.get_note(a.id)?;
                 let store = store.clone();
                 self.delete_with_confirmation(
-                    format!("¿Borrar la nota «{}»?", note.title),
-                    format!("Nota borrada: «{}»", note.title),
+                    trf("¿Borrar la nota «{title}»?", &[("title", &note.title)]),
+                    trf("Nota borrada: «{title}»", &[("title", &note.title)]),
                     move || {
                         if let Some(audio) = store.delete_note(a.id)?
                             && !store.referenced_audio_paths()?.contains(&audio)
@@ -170,25 +171,25 @@ impl Toolbox {
             }
             "list_notebooks" => {
                 let notebooks = store.list_notebooks()?;
-                Ok(ToolOutput::new(json!({ "notebooks": notebooks }), "Cuadernos consultados"))
+                Ok(ToolOutput::new(json!({ "notebooks": notebooks }), tr("Cuadernos consultados")))
             }
             "create_notebook" => {
                 let a: Name = args(input)?;
                 let id = store.create_notebook(&a.name)?;
-                Ok(ToolOutput::new(json!({ "id": id }), format!("Cuaderno creado: «{}»", a.name.trim())))
+                Ok(ToolOutput::new(json!({ "id": id }), trf("Cuaderno creado: «{name}»", &[("name", &a.name.trim())])))
             }
             "rename_notebook" => {
                 let a: Rename = args(input)?;
                 store.rename_notebook(a.id, &a.name)?;
-                Ok(ToolOutput::new(json!({ "renamed": true }), format!("Cuaderno renombrado: «{}»", a.name.trim())))
+                Ok(ToolOutput::new(json!({ "renamed": true }), trf("Cuaderno renombrado: «{name}»", &[("name", &a.name.trim())])))
             }
             "delete_notebook" => {
                 let a: Id = args(input)?;
                 let name = store.notebook_name(a.id)?;
                 let store = store.clone();
                 self.delete_with_confirmation(
-                    format!("¿Borrar el cuaderno «{name}»? Sus notas se conservan, sin cuaderno."),
-                    format!("Cuaderno borrado: «{name}»"),
+                    trf("¿Borrar el cuaderno «{name}»? Sus notas se conservan, sin cuaderno.", &[("name", &name)]),
+                    trf("Cuaderno borrado: «{name}»", &[("name", &name)]),
                     move || store.delete_notebook(a.id),
                 )
                 .await
@@ -199,29 +200,29 @@ impl Toolbox {
                     .into_iter()
                     .map(|(name, notes)| json!({ "name": name, "notes": notes }))
                     .collect();
-                Ok(ToolOutput::new(json!({ "tags": tags }), "Etiquetas consultadas"))
+                Ok(ToolOutput::new(json!({ "tags": tags }), tr("Etiquetas consultadas")))
             }
             "list_todo_lists" => {
                 let lists = store.list_todo_lists()?;
-                Ok(ToolOutput::new(json!({ "lists": lists }), "Listas consultadas"))
+                Ok(ToolOutput::new(json!({ "lists": lists }), tr("Listas consultadas")))
             }
             "create_todo_list" => {
                 let a: Name = args(input)?;
                 let id = store.create_todo_list(&a.name)?;
-                Ok(ToolOutput::new(json!({ "id": id }), format!("Lista creada: «{}»", a.name.trim())))
+                Ok(ToolOutput::new(json!({ "id": id }), trf("Lista creada: «{name}»", &[("name", &a.name.trim())])))
             }
             "rename_todo_list" => {
                 let a: Rename = args(input)?;
                 store.rename_todo_list(a.id, &a.name)?;
-                Ok(ToolOutput::new(json!({ "renamed": true }), format!("Lista renombrada: «{}»", a.name.trim())))
+                Ok(ToolOutput::new(json!({ "renamed": true }), trf("Lista renombrada: «{name}»", &[("name", &a.name.trim())])))
             }
             "delete_todo_list" => {
                 let a: Id = args(input)?;
                 let list = store.todo_list(a.id)?;
                 let store = store.clone();
                 self.delete_with_confirmation(
-                    format!("¿Borrar la lista «{}» y sus {} tareas?", list.name, list.total),
-                    format!("Lista borrada: «{}»", list.name),
+                    trf("¿Borrar la lista «{name}» y sus {count} tareas?", &[("name", &list.name), ("count", &list.total)]),
+                    trf("Lista borrada: «{name}»", &[("name", &list.name)]),
                     move || store.delete_todo_list(a.id),
                 )
                 .await
@@ -235,7 +236,7 @@ impl Toolbox {
                     priority: a.priority.as_deref().map(Priority::parse).transpose()?,
                     reminder_at: a.reminder.as_deref().filter(|r| !r.trim().is_empty()).map(parse_reminder).transpose()?,
                 })?;
-                Ok(ToolOutput::new(json!({ "id": id }), format!("Tarea añadida a «{}»: {}", a.list.trim(), a.text.trim())))
+                Ok(ToolOutput::new(json!({ "id": id }), trf("Tarea añadida a «{list}»: {text}", &[("list", &a.list.trim()), ("text", &a.text.trim())])))
             }
             "list_todos" => {
                 let a: ListTodos = args(input)?;
@@ -243,7 +244,7 @@ impl Toolbox {
                     "pending" => TodoStatus::Pending,
                     "done" => TodoStatus::Done,
                     "all" => TodoStatus::All,
-                    other => bail!("Estado desconocido: {other} (usa pending, done o all)"),
+                    other => bail!(trf("Estado desconocido: {value} (usa pending, done o all)", &[("value", &other)])),
                 };
                 let todos = store.list_todos(&TodoFilter {
                     list: a.list,
@@ -254,7 +255,7 @@ impl Toolbox {
                 })?;
                 let count = todos.len();
                 let todos: Vec<Value> = todos.iter().map(todo_json).collect();
-                Ok(ToolOutput::new(json!({ "todos": todos }), format!("Tareas consultadas: {count}")))
+                Ok(ToolOutput::new(json!({ "todos": todos }), trf("Tareas consultadas: {count}", &[("count", &count)])))
             }
             "update_todo" => {
                 let a: UpdateTodo = args(input)?;
@@ -274,23 +275,23 @@ impl Toolbox {
                     },
                 )?;
                 let todo = store.get_todo(a.id)?;
-                Ok(ToolOutput::new(json!({ "todo": todo_json(&todo) }), format!("Tarea actualizada: {}", todo.text)))
+                Ok(ToolOutput::new(json!({ "todo": todo_json(&todo) }), trf("Tarea actualizada: {text}", &[("text", &todo.text)])))
             }
             "complete_todo" => {
                 let a: CompleteTodo = args(input)?;
                 let done = a.done.unwrap_or(true);
                 store.set_todo_done(a.id, done)?;
                 let todo = store.get_todo(a.id)?;
-                let verb = if done { "completada" } else { "pendiente de nuevo" };
-                Ok(ToolOutput::new(json!({ "done": done }), format!("Tarea {verb}: {}", todo.text)))
+                let summary = if done { tr("Tarea completada: {text}") } else { tr("Tarea pendiente de nuevo: {text}") };
+                Ok(ToolOutput::new(json!({ "done": done }), summary.replace("{text}", &todo.text)))
             }
             "delete_todo" => {
                 let a: Id = args(input)?;
                 let todo = store.get_todo(a.id)?;
                 let store = store.clone();
                 self.delete_with_confirmation(
-                    format!("¿Borrar la tarea «{}» de «{}»?", todo.text, todo.list),
-                    format!("Tarea borrada: {}", todo.text),
+                    trf("¿Borrar la tarea «{text}» de «{list}»?", &[("text", &todo.text), ("list", &todo.list)]),
+                    trf("Tarea borrada: {text}", &[("text", &todo.text)]),
                     move || store.delete_todo(a.id),
                 )
                 .await
@@ -307,7 +308,7 @@ impl ToolExecutor for Toolbox {
 }
 
 fn args<T: DeserializeOwned>(input: Value) -> Result<T> {
-    serde_json::from_value(input).context("Argumentos no válidos")
+    serde_json::from_value(input).with_context(|| tr("Argumentos no válidos"))
 }
 
 fn local_time(unix: i64) -> String {

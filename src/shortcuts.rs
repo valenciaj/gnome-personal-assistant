@@ -13,6 +13,7 @@ use futures_util::StreamExt;
 
 use crate::app::Command;
 use crate::config::APP_ID;
+use crate::i18n::tr;
 
 pub const RECORD: &str = "record";
 pub const REOPEN: &str = "reopen";
@@ -29,11 +30,11 @@ impl Shortcuts {
         // Una app sin sandbox tiene que identificarse ante el portal antes de usarlo.
         ashpd::register_host_app(APP_ID.try_into()?)
             .await
-            .context("No se pudo registrar la app en el portal")?;
+            .with_context(|| tr("No se pudo registrar la app en el portal"))?;
 
         let portal = GlobalShortcuts::new()
             .await
-            .context("El portal GlobalShortcuts no está disponible")?;
+            .with_context(|| tr("El portal GlobalShortcuts no está disponible"))?;
         let session = portal.create_session(CreateSessionOptions::default()).await?;
 
         // GNOME recuerda los atajos de cada app; solo se piden (con diálogo) la primera vez.
@@ -50,9 +51,9 @@ impl Shortcuts {
                 .collect::<Vec<_>>()
         } else {
             let shortcuts = [
-                NewShortcut::new(RECORD, "Grabar y preguntar al asistente")
+                NewShortcut::new(RECORD, tr("Grabar y preguntar al asistente"))
                     .preferred_trigger("LOGO+ALT+space"),
-                NewShortcut::new(REOPEN, "Reabrir la última conversación")
+                NewShortcut::new(REOPEN, tr("Reabrir la última conversación"))
                     .preferred_trigger("LOGO+ALT+r"),
             ];
             portal

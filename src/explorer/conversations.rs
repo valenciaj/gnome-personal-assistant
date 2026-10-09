@@ -10,6 +10,7 @@ use super::{Ctx, clear_list, local_time, placeholder, select_by_name, sidebar, s
 use crate::app::Command;
 use crate::conversation_view::ConversationView;
 use crate::store::ConversationInfo;
+use crate::i18n::tr;
 
 pub struct Page {
     ctx: Ctx,
@@ -27,7 +28,7 @@ pub struct Page {
 
 impl Page {
     pub fn new(ctx: Ctx) -> Rc<Self> {
-        let search = gtk::SearchEntry::builder().placeholder_text("Buscar conversaciones").hexpand(true).build();
+        let search = gtk::SearchEntry::builder().placeholder_text(tr("Buscar conversaciones")).hexpand(true).build();
         let tools = toolbar_box();
         tools.append(&search);
         let list = gtk::ListBox::new();
@@ -39,14 +40,14 @@ impl Page {
         titles.append(&title);
         titles.append(&subtitle);
         let resume = gtk::Button::builder()
-            .label("Continuar")
-            .tooltip_text("Abrir en el popup para seguir la conversación")
+            .label(tr("Continuar"))
+            .tooltip_text(tr("Abrir en el popup para seguir la conversación"))
             .css_classes(["suggested-action"])
             .valign(gtk::Align::Center)
             .build();
         let delete = gtk::Button::builder()
             .icon_name("user-trash-symbolic")
-            .tooltip_text("Borrar la conversación")
+            .tooltip_text(tr("Borrar la conversación"))
             .valign(gtk::Align::Center)
             .build();
         let header = toolbar_box();
@@ -63,7 +64,7 @@ impl Page {
 
         let detail = gtk::Stack::new();
         detail.add_named(
-            &placeholder("user-available-symbolic", "Sin conversación", "Elige una conversación de la lista."),
+            &placeholder("user-available-symbolic", &tr("Sin conversación"), &tr("Elige una conversación de la lista.")),
             Some("empty"),
         );
         detail.add_named(&content, Some("detail"));
@@ -161,7 +162,7 @@ impl Page {
         self.subtitle.set_text(&format!(
             "{} · {} · {}",
             local_time(info.created),
-            crate::config::LlmProvider::from_id(&info.provider).map_or(info.provider.as_str(), |p| p.label()),
+            crate::config::LlmProvider::from_id(&info.provider).map_or(info.provider.clone(), |p| p.label()),
             info.model
         ));
         self.view.clear();
@@ -175,9 +176,9 @@ impl Page {
         let Some(id) = self.selected.get() else { return };
         let this = self.clone();
         self.ctx.confirm(
-            "¿Borrar la conversación?",
-            "Se borran sus mensajes y grabaciones. Las notas y tareas creadas en ella se conservan.",
-            "Borrar",
+            &tr("¿Borrar la conversación?"),
+            &tr("Se borran sus mensajes y grabaciones. Las notas y tareas creadas en ella se conservan."),
+            &tr("Borrar"),
             move || {
                 let store = &this.ctx.store;
                 let audios: Vec<String> = store
@@ -193,7 +194,7 @@ impl Page {
                     }
                     this.selected.set(None);
                     this.refresh();
-                    this.ctx.toast("Conversación borrada");
+                    this.ctx.toast(&tr("Conversación borrada"));
                 }
             },
         );

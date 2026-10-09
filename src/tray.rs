@@ -3,6 +3,7 @@
 use ksni::TrayMethods;
 
 use crate::app::Command;
+use crate::i18n::{n_, tr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayState {
@@ -29,7 +30,7 @@ impl ksni::Tray for AppTray {
     }
 
     fn title(&self) -> String {
-        "Asistente personal".into()
+        tr("Asistente personal")
     }
 
     fn icon_name(&self) -> String {
@@ -44,14 +45,14 @@ impl ksni::Tray for AppTray {
 
     fn tool_tip(&self) -> ksni::ToolTip {
         let description = match self.state {
-            TrayState::Idle => "Listo",
-            TrayState::Recording => "Grabando…",
-            TrayState::Busy => "Pensando…",
-            TrayState::Error => "Ha ocurrido un error",
+            TrayState::Idle => tr("Listo"),
+            TrayState::Recording => tr("Grabando…"),
+            TrayState::Busy => tr("Pensando…"),
+            TrayState::Error => tr("Ha ocurrido un error"),
         };
         ksni::ToolTip {
-            title: "Asistente personal".into(),
-            description: description.into(),
+            title: tr("Asistente personal"),
+            description,
             ..Default::default()
         }
     }
@@ -64,7 +65,7 @@ impl ksni::Tray for AppTray {
         use ksni::menu::StandardItem;
         let item = |label: &str, icon: &str, command: Command| -> ksni::MenuItem<Self> {
             StandardItem {
-                label: label.into(),
+                label: tr(label),
                 icon_name: icon.into(),
                 activate: Box::new(move |this: &mut Self| this.send(command.clone())),
                 ..Default::default()
@@ -72,18 +73,18 @@ impl ksni::Tray for AppTray {
             .into()
         };
         let record = if self.state == TrayState::Recording {
-            item("Parar grabación", "media-playback-stop-symbolic", Command::ToggleRecording)
+            item(n_("Parar grabación"), "media-playback-stop-symbolic", Command::ToggleRecording)
         } else {
-            item("Grabar", "audio-input-microphone-symbolic", Command::ToggleRecording)
+            item(n_("Grabar"), "audio-input-microphone-symbolic", Command::ToggleRecording)
         };
         vec![
             record,
-            item("Escribir…", "document-edit-symbolic", Command::NewTextConversation),
-            item("Última conversación", "user-available-symbolic", Command::Reopen),
-            item("Notas, tareas e historial…", "view-list-bullet-symbolic", Command::ShowExplorer),
+            item(n_("Escribir…"), "document-edit-symbolic", Command::NewTextConversation),
+            item(n_("Última conversación"), "user-available-symbolic", Command::Reopen),
+            item(n_("Notas, tareas e historial…"), "view-list-bullet-symbolic", Command::ShowExplorer),
             ksni::MenuItem::Separator,
-            item("Preferencias…", "preferences-system-symbolic", Command::ShowPreferences),
-            item("Salir", "application-exit-symbolic", Command::Quit),
+            item(n_("Preferencias…"), "preferences-system-symbolic", Command::ShowPreferences),
+            item(n_("Salir"), "application-exit-symbolic", Command::Quit),
         ]
     }
 }

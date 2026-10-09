@@ -11,12 +11,13 @@ use crate::app::Command;
 use crate::config::{self, AudioRetention, Config, LlmProvider, RecordingMode, STT_SECRET, SttProvider};
 use crate::runtime::runtime;
 use crate::{audio, llm, secrets};
+use crate::i18n::{n_, tr, trf};
 
 const STT_MODELS: [&str; 3] = ["gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"];
 const RECORDING_MODES: [(RecordingMode, &str); 3] = [
-    (RecordingMode::Toggle, "Pulsar para empezar y para parar"),
-    (RecordingMode::PushToTalk, "Mantener pulsado el atajo"),
-    (RecordingMode::AutoStop, "Parar sola al detectar silencio"),
+    (RecordingMode::Toggle, n_("Pulsar para empezar y para parar")),
+    (RecordingMode::PushToTalk, n_("Mantener pulsado el atajo")),
+    (RecordingMode::AutoStop, n_("Parar sola al detectar silencio")),
 ];
 
 struct Prefs {
@@ -38,7 +39,7 @@ pub fn show(parent: Option<&gtk::Widget>, commands: async_channel::Sender<Comman
         log::error!("{err:#}");
         Config::default()
     });
-    let dialog = adw::PreferencesDialog::builder().title("Preferencias").search_enabled(true).build();
+    let dialog = adw::PreferencesDialog::builder().title(tr("Preferencias")).search_enabled(true).build();
 
     let models_list = gtk::ListBox::builder().css_classes(["navigation-sidebar"]).build();
     let models_status = gtk::Label::builder().wrap(true).max_width_chars(30).margin_top(6).margin_bottom(6).css_classes(["dim-label"]).build();
@@ -47,15 +48,15 @@ pub fn show(parent: Option<&gtk::Widget>, commands: async_channel::Sender<Comman
         config: RefCell::new(config),
         loading: Cell::new(false),
         provider: adw::ComboRow::builder()
-            .title("Proveedor")
-            .model(&gtk::StringList::new(&LlmProvider::ALL.map(LlmProvider::label)))
+            .title(tr("Proveedor"))
+            .model(&gtk::StringList::new(&LlmProvider::ALL.map(LlmProvider::label).iter().map(String::as_str).collect::<Vec<_>>()))
             .build(),
-        url: adw::EntryRow::builder().title("URL base").build(),
-        key: adw::PasswordEntryRow::builder().title("API key").show_apply_button(true).build(),
-        model: adw::EntryRow::builder().title("Modelo").build(),
+        url: adw::EntryRow::builder().title(tr("URL base")).build(),
+        key: adw::PasswordEntryRow::builder().title(tr("API key")).show_apply_button(true).build(),
+        model: adw::EntryRow::builder().title(tr("Modelo")).build(),
         models_list,
         models_status,
-        reasoning: adw::ComboRow::builder().title("Razonamiento").build(),
+        reasoning: adw::ComboRow::builder().title(tr("Razonamiento")).build(),
     });
 
     dialog.add(&general_page(&prefs, &commands));
@@ -100,7 +101,8 @@ impl Prefs {
         self.key.set_visible(provider != LlmProvider::Ollama);
         self.model.set_text(&settings.model);
         let levels = provider.reasoning_levels();
-        self.reasoning.set_model(Some(&gtk::StringList::new(&levels.iter().map(|(_, label)| *label).collect::<Vec<_>>())));
+        let labels: Vec<String> = levels.iter().map(|(_, label)| tr(label)).collect();
+        self.reasoning.set_model(Some(&gtk::StringList::new(&labels.iter().map(String::as_str).collect::<Vec<_>>())));
         self.reasoning.set_selected(levels.iter().position(|(value, _)| *value == settings.reasoning).unwrap_or(0) as u32);
         self.models_list.remove_all();
         self.models_status.set_text("");
@@ -110,7 +112,7 @@ impl Prefs {
     /// Pide al proveedor su lista de modelos y la muestra en el desplegable.
     async fn fetch_models(self: Rc<Self>) {
         self.models_list.remove_all();
-        self.models_status.set_text("Consultando modelos…");
+        self.models_status.set_text(&tr("Consultando modelos…"));
         self.models_status.set_visible(true);
         let provider = self.provider();
         // Aplicar una clave escrita pero aún no guardada.
@@ -125,7 +127,7 @@ impl Prefs {
             Err(err) => Err(err),
         };
         match result {
-            Ok(models) if models.is_empty() => self.models_status.set_text("El proveedor no ha devuelto modelos"),
+            Ok(models) if models.is_empty() => self.models_status.set_text(&tr("El proveedor no ha devuelto modelos")),
             Ok(models) => {
                 self.models_status.set_visible(false);
                 for model in models {
@@ -141,18 +143,18 @@ impl Prefs {
 async fn save_secret(prefs: &Prefs, name: String, value: String) {
     let saved = runtime().spawn(async move { secrets::set(&name, &value).await }).await;
     match saved {
-        Ok(Ok(())) => prefs.toast("Clave guardada en el llavero"),
-        Ok(Err(err)) => prefs.toast(&format!("No se pudo guardar la clave: {err:#}")),
+        Ok(Ok(())) => prefs.toast(&tr("Clave guardada en el llavero")),
+        Ok(Err(err)) => prefs.toast(&trf("No se pudo guardar la clave: {error}", &[("error", &format!("{err:#}"))])),
         Err(err) => prefs.toast(&format!("{err}")),
     }
 }
 
 fn general_page(prefs: &Rc<Prefs>, commands: &async_channel::Sender<Command>) -> adw::PreferencesPage {
-    let page = adw::PreferencesPage::builder().name("general").title("General").icon_name("emblem-system-symbolic").build();
+    let page = adw::PreferencesPage::builder().name("general").title(tr("General")).icon_name("emblem-system-symbolic").build();
 
     let prompt_group = adw::PreferencesGroup::builder()
-        .title("Instrucciones del asistente")
-        .description("Cómo debe comportarse. Se aplican a las conversaciones nuevas.")
+        .title(tr("Instrucciones del asistente"))
+        .description(tr("Cómo debe comportarse. Se aplican a las conversaciones nuevas."))
         .build();
     let buffer = gtk::TextBuffer::new(None);
     buffer.set_text(&prefs.config.borrow().system_prompt);
@@ -179,7 +181,7 @@ fn general_page(prefs: &Rc<Prefs>, commands: &async_channel::Sender<Command>) ->
         }
     ));
     let restore = gtk::Button::builder()
-        .label("Restaurar las instrucciones por defecto")
+        .label(tr("Restaurar las instrucciones por defecto"))
         .halign(gtk::Align::End)
         .margin_top(6)
         .css_classes(["flat"])
@@ -188,12 +190,67 @@ fn general_page(prefs: &Rc<Prefs>, commands: &async_channel::Sender<Command>) ->
     prompt_group.add(&restore);
     page.add(&prompt_group);
 
-    let shortcuts = adw::PreferencesGroup::builder().title("Atajos de teclado").build();
-    let row = adw::ActionRow::builder()
-        .title("Atajos globales")
-        .subtitle("Por defecto Super+Alt+Espacio graba y Super+Alt+R reabre la última conversación")
+    let startup = adw::PreferencesGroup::builder().title(tr("Aplicación")).build();
+    let autostart = adw::SwitchRow::builder()
+        .title(tr("Arrancar al iniciar sesión"))
+        .subtitle(tr("Necesario para los atajos y los recordatorios"))
+        .active(crate::autostart::is_enabled())
         .build();
-    let change = gtk::Button::builder().label("Cambiar…").valign(gtk::Align::Center).build();
+    autostart.connect_active_notify(glib::clone!(
+        #[weak]
+        prefs,
+        move |row| {
+            if let Err(err) = crate::autostart::set_enabled(row.is_active()) {
+                prefs.toast(&format!("{err:#}"));
+            }
+        }
+    ));
+    const LANGUAGES: [(&str, &str); 3] = [("auto", n_("Automático (idioma del sistema)")), ("es", "Español"), ("en", "English")];
+    let language = adw::ComboRow::builder()
+        .title(tr("Idioma de la interfaz"))
+        .subtitle(tr("Se aplica al reiniciar la aplicación"))
+        .model(&gtk::StringList::new(&LANGUAGES.map(|(_, label)| tr(label)).iter().map(String::as_str).collect::<Vec<_>>()))
+        .selected(LANGUAGES.iter().position(|(code, _)| *code == prefs.config.borrow().language).unwrap_or(0) as u32)
+        .build();
+    language.connect_selected_notify(glib::clone!(
+        #[weak]
+        prefs,
+        move |row| prefs.config.borrow_mut().language = LANGUAGES[row.selected() as usize].0.to_owned()
+    ));
+    startup.add(&autostart);
+    startup.add(&language);
+    page.add(&startup);
+
+    let reminders_config = prefs.config.borrow().reminders.clone();
+    let reminders = adw::PreferencesGroup::builder()
+        .title(tr("Recordatorios de tareas"))
+        .description(tr("Avisan con una notificación cuando llega la fecha o la hora de aviso de una tarea."))
+        .build();
+    let enabled = adw::SwitchRow::builder().title(tr("Avisar de las tareas")).active(reminders_config.enabled).build();
+    let default_time = adw::EntryRow::builder()
+        .title(tr("Hora del aviso de las tareas sin hora (HH:MM)"))
+        .text(&reminders_config.default_time)
+        .build();
+    enabled.connect_active_notify(glib::clone!(
+        #[weak]
+        prefs,
+        move |row| prefs.config.borrow_mut().reminders.enabled = row.is_active()
+    ));
+    default_time.connect_changed(glib::clone!(
+        #[weak]
+        prefs,
+        move |row| prefs.config.borrow_mut().reminders.default_time = row.text().trim().to_owned()
+    ));
+    reminders.add(&enabled);
+    reminders.add(&default_time);
+    page.add(&reminders);
+
+    let shortcuts = adw::PreferencesGroup::builder().title(tr("Atajos de teclado")).build();
+    let row = adw::ActionRow::builder()
+        .title(tr("Atajos globales"))
+        .subtitle(tr("Por defecto Super+Alt+Espacio graba y Super+Alt+R reabre la última conversación"))
+        .build();
+    let change = gtk::Button::builder().label(tr("Cambiar…")).valign(gtk::Align::Center).build();
     let commands = commands.clone();
     change.connect_clicked(move |_| {
         let _ = commands.try_send(Command::ConfigureShortcuts);
@@ -205,12 +262,12 @@ fn general_page(prefs: &Rc<Prefs>, commands: &async_channel::Sender<Command>) ->
 }
 
 fn ai_page(prefs: &Rc<Prefs>) -> adw::PreferencesPage {
-    let page = adw::PreferencesPage::builder().name("ai").title("IA").icon_name("starred-symbolic").build();
+    let page = adw::PreferencesPage::builder().name("ai").title(tr("IA")).icon_name("starred-symbolic").build();
 
     // ── Modelo de lenguaje ──
     let group = adw::PreferencesGroup::builder()
-        .title("Modelo de lenguaje")
-        .description("El proveedor y el modelo que responden. Las conversaciones ya empezadas siguen con su modelo.")
+        .title(tr("Modelo de lenguaje"))
+        .description(tr("El proveedor y el modelo que responden. Las conversaciones ya empezadas siguen con su modelo."))
         .build();
     let models_popover = gtk::Popover::builder()
         .child(&{
@@ -229,13 +286,13 @@ fn ai_page(prefs: &Rc<Prefs>) -> adw::PreferencesPage {
         .build();
     let models_button = gtk::MenuButton::builder()
         .icon_name("pan-down-symbolic")
-        .tooltip_text("Elegir de los modelos disponibles")
+        .tooltip_text(tr("Elegir de los modelos disponibles"))
         .valign(gtk::Align::Center)
         .css_classes(["flat"])
         .popover(&models_popover)
         .build();
     prefs.model.add_suffix(&models_button);
-    let test = adw::ButtonRow::builder().title("Comprobar la conexión").build();
+    let test = adw::ButtonRow::builder().title(tr("Comprobar la conexión")).build();
 
     for row in [
         prefs.provider.upcast_ref::<gtk::Widget>(),
@@ -329,7 +386,7 @@ fn ai_page(prefs: &Rc<Prefs>) -> adw::PreferencesPage {
                 prefs.clone().fetch_models().await;
                 let count = prefs.models_list.observe_children().n_items();
                 if count > 0 {
-                    prefs.toast(&format!("Conexión correcta: {count} modelos disponibles"));
+                    prefs.toast(&trf("Conexión correcta: {count} modelos disponibles", &[("count", &count)]));
                 } else {
                     prefs.toast(&prefs.models_status.text());
                 }
@@ -339,19 +396,19 @@ fn ai_page(prefs: &Rc<Prefs>) -> adw::PreferencesPage {
 
     // ── Transcripción ──
     let stt = adw::PreferencesGroup::builder()
-        .title("Transcripción")
-        .description("Convierte tu voz en texto. Si no pones una clave propia se usa la de OpenAI de arriba.")
+        .title(tr("Transcripción"))
+        .description(tr("Convierte tu voz en texto. Si no pones una clave propia se usa la de OpenAI de arriba."))
         .build();
     let stt_config = prefs.config.borrow().stt.clone();
     let stt_provider = adw::ComboRow::builder()
-        .title("Servicio")
-        .model(&gtk::StringList::new(&["OpenAI", "Compatible con OpenAI"]))
+        .title(tr("Servicio"))
+        .model(&gtk::StringList::new(&["OpenAI", &tr("Compatible con OpenAI")]))
         .selected(match stt_config.provider {
             SttProvider::Openai => 0,
             SttProvider::OpenaiCompatible => 1,
         })
         .build();
-    let stt_model = adw::EntryRow::builder().title("Modelo").text(&stt_config.model).build();
+    let stt_model = adw::EntryRow::builder().title(tr("Modelo")).text(&stt_config.model).build();
     let stt_menu = gio_menu_button(&STT_MODELS, glib::clone!(
         #[weak]
         stt_model,
@@ -359,15 +416,15 @@ fn ai_page(prefs: &Rc<Prefs>) -> adw::PreferencesPage {
     ));
     stt_model.add_suffix(&stt_menu);
     let stt_language = adw::EntryRow::builder()
-        .title("Idioma (código como «es»; vacío = detectar)")
+        .title(tr("Idioma (código como «es»; vacío = detectar)"))
         .text(&stt_config.language)
         .build();
     let stt_key = adw::PasswordEntryRow::builder()
-        .title("API key propia (opcional)")
+        .title(tr("API key propia (opcional)"))
         .text(secrets::get(STT_SECRET).unwrap_or_default())
         .show_apply_button(true)
         .build();
-    let stt_url = adw::EntryRow::builder().title("URL base").text(&stt_config.base_url).build();
+    let stt_url = adw::EntryRow::builder().title(tr("URL base")).text(&stt_config.base_url).build();
     for row in [
         stt_provider.upcast_ref::<gtk::Widget>(),
         stt_model.upcast_ref(),
@@ -414,28 +471,28 @@ fn ai_page(prefs: &Rc<Prefs>) -> adw::PreferencesPage {
 }
 
 fn recording_page(prefs: &Rc<Prefs>) -> adw::PreferencesPage {
-    let page = adw::PreferencesPage::builder().name("recording").title("Grabación").icon_name("audio-input-microphone-symbolic").build();
+    let page = adw::PreferencesPage::builder().name("recording").title(tr("Grabación")).icon_name("audio-input-microphone-symbolic").build();
     let recording = prefs.config.borrow().recording.clone();
 
-    let group = adw::PreferencesGroup::builder().title("Grabación").build();
+    let group = adw::PreferencesGroup::builder().title(tr("Grabación")).build();
     let mode = adw::ComboRow::builder()
-        .title("Modo del atajo")
-        .model(&gtk::StringList::new(&RECORDING_MODES.map(|(_, label)| label)))
+        .title(tr("Modo del atajo"))
+        .model(&gtk::StringList::new(&RECORDING_MODES.map(|(_, label)| tr(label)).iter().map(String::as_str).collect::<Vec<_>>()))
         .selected(RECORDING_MODES.iter().position(|(m, _)| *m == recording.mode).unwrap_or(0) as u32)
         .build();
     let silence = adw::SpinRow::builder()
-        .title("Silencio para parar")
-        .subtitle("Segundos sin voz tras los que se para en el modo automático")
+        .title(tr("Silencio para parar"))
+        .subtitle(tr("Segundos sin voz tras los que se para en el modo automático"))
         .adjustment(&gtk::Adjustment::new(recording.silence_seconds, 0.5, 10.0, 0.5, 1.0, 0.0))
         .digits(1)
         .build();
     let threshold = adw::SpinRow::builder()
-        .title("Umbral de voz (dB)")
-        .subtitle("Sube el número si el ruido de fondo impide que pare; bájalo si corta mientras hablas")
+        .title(tr("Umbral de voz (dB)"))
+        .subtitle(tr("Sube el número si el ruido de fondo impide que pare; bájalo si corta mientras hablas"))
         .adjustment(&gtk::Adjustment::new(recording.voice_threshold_db, -70.0, -10.0, 1.0, 5.0, 0.0))
         .build();
     let max = adw::SpinRow::builder()
-        .title("Duración máxima (segundos)")
+        .title(tr("Duración máxima (segundos)"))
         .adjustment(&gtk::Adjustment::new(f64::from(recording.max_seconds), 10.0, 1800.0, 10.0, 60.0, 0.0))
         .build();
     let auto_stop = recording.mode == RecordingMode::AutoStop;
@@ -443,19 +500,19 @@ fn recording_page(prefs: &Rc<Prefs>) -> adw::PreferencesPage {
     threshold.set_sensitive(auto_stop);
 
     let devices = audio::input_devices();
-    let mut names = vec!["Predeterminado del sistema".to_owned()];
+    let mut names = vec![tr("Predeterminado del sistema")];
     names.extend(devices.iter().map(|(name, _)| name.clone()));
     let device = adw::ComboRow::builder()
-        .title("Micrófono")
+        .title(tr("Micrófono"))
         .model(&gtk::StringList::new(&names.iter().map(String::as_str).collect::<Vec<_>>()))
         .selected(devices.iter().position(|(_, node)| *node == recording.device).map_or(0, |i| i + 1) as u32)
         .build();
 
-    let feedback = adw::PreferencesGroup::builder().title("Avisos").build();
-    let sounds = adw::SwitchRow::builder().title("Sonidos al empezar y al parar").active(recording.sounds).build();
+    let feedback = adw::PreferencesGroup::builder().title(tr("Avisos")).build();
+    let sounds = adw::SwitchRow::builder().title(tr("Sonidos al empezar y al parar")).active(recording.sounds).build();
     let indicator = adw::SwitchRow::builder()
-        .title("Ventanita de grabación")
-        .subtitle("Muestra el tiempo y el nivel del micrófono mientras grabas")
+        .title(tr("Ventanita de grabación"))
+        .subtitle(tr("Muestra el tiempo y el nivel del micrófono mientras grabas"))
         .active(recording.indicator)
         .build();
 
@@ -521,24 +578,24 @@ fn recording_page(prefs: &Rc<Prefs>) -> adw::PreferencesPage {
 }
 
 fn data_page(prefs: &Rc<Prefs>) -> adw::PreferencesPage {
-    let page = adw::PreferencesPage::builder().name("data").title("Datos").icon_name("drive-harddisk-symbolic").build();
+    let page = adw::PreferencesPage::builder().name("data").title(tr("Datos")).icon_name("drive-harddisk-symbolic").build();
     let audio_config = prefs.config.borrow().audio.clone();
 
     let group = adw::PreferencesGroup::builder()
-        .title("Grabaciones")
-        .description("Las grabaciones adjuntas a notas se conservan siempre.")
+        .title(tr("Grabaciones"))
+        .description(tr("Las grabaciones adjuntas a notas se conservan siempre."))
         .build();
     let retention = adw::ComboRow::builder()
-        .title("Guardar el audio")
-        .model(&gtk::StringList::new(&["Solo el adjunto a notas", "Siempre, en el historial"]))
+        .title(tr("Guardar el audio"))
+        .model(&gtk::StringList::new(&[&tr("Solo el adjunto a notas"), &tr("Siempre, en el historial")]))
         .selected(match audio_config.retention {
             AudioRetention::WithNotes => 0,
             AudioRetention::Always => 1,
         })
         .build();
     let days = adw::SpinRow::builder()
-        .title("Borrar las del historial tras (días)")
-        .subtitle("0 = no borrarlas nunca")
+        .title(tr("Borrar las del historial tras (días)"))
+        .subtitle(tr("0 = no borrarlas nunca"))
         .adjustment(&gtk::Adjustment::new(f64::from(audio_config.delete_after_days), 0.0, 3650.0, 1.0, 30.0, 0.0))
         .build();
     group.add(&retention);
@@ -547,7 +604,7 @@ fn data_page(prefs: &Rc<Prefs>) -> adw::PreferencesPage {
 
     let folder = adw::PreferencesGroup::new();
     let open = adw::ActionRow::builder()
-        .title("Carpeta de datos")
+        .title(tr("Carpeta de datos"))
         .subtitle(config::data_dir().display().to_string())
         .activatable(true)
         .build();

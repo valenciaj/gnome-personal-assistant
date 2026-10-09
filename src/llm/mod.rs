@@ -14,6 +14,7 @@ use anyhow::{Result, anyhow, bail};
 use serde_json::Value;
 
 use crate::config::{LlmConfig, LlmProvider};
+use crate::i18n::{tr, trf};
 
 /// Definición de una tool en formato neutro (JSON Schema).
 #[derive(Debug, Clone)]
@@ -94,11 +95,11 @@ impl Client {
         let settings = config.settings(provider);
         let model = model.unwrap_or(&settings.model);
         if model.trim().is_empty() {
-            bail!("No hay modelo configurado para {}", provider.label());
+            bail!(trf("No hay modelo configurado para {provider}", &[("provider", &provider.label())]));
         }
         let api_key = config.api_key(provider);
         if api_key.is_empty() && provider != LlmProvider::Ollama {
-            bail!("Falta la API key de {}", provider.label());
+            bail!(trf("Falta la API key de {provider}", &[("provider", &provider.label())]));
         }
         Ok(Self {
             provider,
@@ -229,7 +230,7 @@ pub async fn run_agent(
         messages.extend(client.tool_result_messages(&results));
         display.extend(results.into_iter().map(DisplayItem::Tool));
     }
-    bail!("El modelo ha encadenado demasiadas llamadas a tools sin terminar")
+    bail!(tr("El modelo ha encadenado demasiadas llamadas a tools sin terminar"))
 }
 
 #[cfg(test)]

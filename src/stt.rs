@@ -7,15 +7,16 @@ use reqwest::multipart::{Form, Part};
 
 use crate::config::SttConfig;
 use crate::llm::http_client;
+use crate::i18n::{tr, trf};
 
 pub async fn transcribe(config: &SttConfig, audio: &Path) -> Result<String> {
     let api_key = config.api_key();
     if api_key.is_empty() && config.base_url.contains("api.openai.com") {
-        bail!("Falta la API key de OpenAI para transcribir");
+        bail!(tr("Falta la API key de OpenAI para transcribir"));
     }
     let bytes = tokio::fs::read(audio)
         .await
-        .with_context(|| format!("No se pudo leer {}", audio.display()))?;
+        .with_context(|| trf("No se pudo leer {path}", &[("path", &audio.display())]))?;
 
     let file = Part::bytes(bytes).file_name("audio.ogg").mime_str("audio/ogg")?;
     let mut form = Form::new()

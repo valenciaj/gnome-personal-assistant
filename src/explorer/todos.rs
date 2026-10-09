@@ -8,8 +8,9 @@ use gtk::glib;
 
 use super::{Ctx, clear_list, local_time, placeholder, select_by_name, sidebar, split, toolbar_box};
 use crate::store::{Priority, Todo, TodoFilter, TodoStatus, TodoUpdate};
+use crate::i18n::{n_, tr, trf};
 
-const PRIORITIES: [&str; 4] = ["Ninguna", "Baja", "Media", "Alta"];
+const PRIORITIES: [&str; 4] = [n_("Ninguna"), n_("Baja"), n_("Media"), n_("Alta")];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Selection {
@@ -35,8 +36,8 @@ pub struct Page {
 
 impl Page {
     pub fn new(ctx: Ctx) -> Rc<Self> {
-        let heading = gtk::Label::builder().label("Listas").xalign(0.0).hexpand(true).margin_start(6).css_classes(["heading"]).build();
-        let new_list = gtk::Button::builder().icon_name("list-add-symbolic").tooltip_text("Nueva lista").build();
+        let heading = gtk::Label::builder().label(tr("Listas")).xalign(0.0).hexpand(true).margin_start(6).css_classes(["heading"]).build();
+        let new_list = gtk::Button::builder().icon_name("list-add-symbolic").tooltip_text(tr("Nueva lista")).build();
         let tools = toolbar_box();
         tools.append(&heading);
         tools.append(&new_list);
@@ -46,11 +47,11 @@ impl Page {
         let title = gtk::Label::builder().xalign(0.0).hexpand(true).css_classes(["title-3"]).build();
         let show_done = gtk::ToggleButton::builder()
             .icon_name("object-select-symbolic")
-            .tooltip_text("Mostrar las completadas")
+            .tooltip_text(tr("Mostrar las completadas"))
             .valign(gtk::Align::Center)
             .build();
-        let rename = gtk::Button::builder().icon_name("document-edit-symbolic").tooltip_text("Renombrar la lista").valign(gtk::Align::Center).build();
-        let delete = gtk::Button::builder().icon_name("user-trash-symbolic").tooltip_text("Borrar la lista").valign(gtk::Align::Center).build();
+        let rename = gtk::Button::builder().icon_name("document-edit-symbolic").tooltip_text(tr("Renombrar la lista")).valign(gtk::Align::Center).build();
+        let delete = gtk::Button::builder().icon_name("user-trash-symbolic").tooltip_text(tr("Borrar la lista")).valign(gtk::Align::Center).build();
         let header = toolbar_box();
         header.set_margin_start(12);
         header.append(&title);
@@ -59,7 +60,7 @@ impl Page {
         header.append(&delete);
 
         let add_entry = gtk::Entry::builder()
-            .placeholder_text("Añadir tarea…")
+            .placeholder_text(tr("Añadir tarea…"))
             .primary_icon_name("list-add-symbolic")
             .build();
         let todos = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
@@ -84,7 +85,7 @@ impl Page {
         content.append(&scroller);
 
         let detail = gtk::Stack::new();
-        detail.add_named(&placeholder("object-select-symbolic", "Sin lista", "Elige una lista o crea una nueva."), Some("empty"));
+        detail.add_named(&placeholder("object-select-symbolic", &tr("Sin lista"), &tr("Elige una lista o crea una nueva.")), Some("empty"));
         detail.add_named(&content, Some("detail"));
 
         let root = split(&left, &detail);
@@ -120,7 +121,7 @@ impl Page {
             this,
             move |_| {
                 let page = this.clone();
-                this.ctx.ask_text("Nueva lista", "", "Crear", move |name| {
+                this.ctx.ask_text(&tr("Nueva lista"), "", &tr("Crear"), move |name| {
                     if let Some(id) = page.ctx.check(page.ctx.store.create_todo_list(&name)) {
                         page.selection.set(Some(Selection::List(id)));
                         page.refresh();
@@ -176,7 +177,7 @@ impl Page {
         let pending: i64 = lists.iter().map(|l| l.pending).sum();
         self.refreshing.set(true);
         clear_list(&self.lists);
-        self.lists.append(&list_row("all", "Todas las pendientes", pending, "view-list-symbolic"));
+        self.lists.append(&list_row("all", &tr("Todas las pendientes"), pending, "view-list-symbolic"));
         for list in &lists {
             self.lists.append(&list_row(&format!("list-{}", list.id), &list.name, list.pending, "checkbox-checked-symbolic"));
         }
@@ -200,7 +201,7 @@ impl Page {
         };
         let is_list = matches!(selection, Selection::List(_));
         let (title, filter) = match selection {
-            Selection::AllPending => ("Todas las pendientes".to_owned(), TodoFilter::default()),
+            Selection::AllPending => (tr("Todas las pendientes"), TodoFilter::default()),
             Selection::List(id) => {
                 let Some(list) = self.ctx.check(self.ctx.store.todo_list(id)) else { return };
                 let status = if self.show_done.is_active() { TodoStatus::All } else { TodoStatus::Pending };
@@ -216,7 +217,7 @@ impl Page {
         let Some(todos) = self.ctx.check(self.ctx.store.list_todos(&filter)) else { return };
         clear_list(&self.todos);
         if todos.is_empty() {
-            let row = adw::ActionRow::builder().title("No hay tareas").sensitive(false).build();
+            let row = adw::ActionRow::builder().title(tr("No hay tareas")).sensitive(false).build();
             self.todos.append(&row);
         }
         for todo in &todos {
@@ -251,20 +252,20 @@ impl Page {
             }
         ));
 
-        let edit = gtk::Button::builder().icon_name("document-edit-symbolic").tooltip_text("Editar").valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let edit = gtk::Button::builder().icon_name("document-edit-symbolic").tooltip_text(tr("Editar")).valign(gtk::Align::Center).css_classes(["flat"]).build();
         edit.connect_clicked(glib::clone!(
             #[weak(rename_to = this)]
             self,
             move |_| this.edit_todo(id)
         ));
-        let delete = gtk::Button::builder().icon_name("user-trash-symbolic").tooltip_text("Borrar").valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let delete = gtk::Button::builder().icon_name("user-trash-symbolic").tooltip_text(tr("Borrar")).valign(gtk::Align::Center).css_classes(["flat"]).build();
         let text = todo.text.clone();
         delete.connect_clicked(glib::clone!(
             #[weak(rename_to = this)]
             self,
             move |_| {
                 if this.ctx.check(this.ctx.store.delete_todo(id)).is_some() {
-                    this.ctx.toast(&format!("Tarea borrada: {text}"));
+                    this.ctx.toast(&trf("Tarea borrada: {text}", &[("text", &text)]));
                     this.refresh();
                 }
             }
@@ -278,16 +279,16 @@ impl Page {
         let Some(todo) = self.ctx.check(self.ctx.store.get_todo(id)) else { return };
         let Some(lists) = self.ctx.check(self.ctx.store.list_todo_lists()) else { return };
 
-        let text = adw::EntryRow::builder().title("Texto").text(&todo.text).build();
-        let due = adw::EntryRow::builder().title("Fecha límite (AAAA-MM-DD [HH:MM])").text(todo.due.as_deref().unwrap_or_default()).build();
-        let priority = adw::ComboRow::builder().title("Prioridad").model(&gtk::StringList::new(&PRIORITIES)).build();
+        let text = adw::EntryRow::builder().title(tr("Texto")).text(&todo.text).build();
+        let due = adw::EntryRow::builder().title(tr("Fecha límite (AAAA-MM-DD [HH:MM])")).text(todo.due.as_deref().unwrap_or_default()).build();
+        let priority = adw::ComboRow::builder().title(tr("Prioridad")).model(&gtk::StringList::new(&PRIORITIES.map(tr).iter().map(String::as_str).collect::<Vec<_>>())).build();
         priority.set_selected(todo.priority.to_db() as u32);
         let reminder = adw::EntryRow::builder()
-            .title("Aviso (AAAA-MM-DD HH:MM)")
+            .title(tr("Aviso (AAAA-MM-DD HH:MM)"))
             .text(todo.reminder_at.map(local_time).unwrap_or_default())
             .build();
         let names: Vec<&str> = lists.iter().map(|l| l.name.as_str()).collect();
-        let list = adw::ComboRow::builder().title("Lista").model(&gtk::StringList::new(&names)).build();
+        let list = adw::ComboRow::builder().title(tr("Lista")).model(&gtk::StringList::new(&names)).build();
         list.set_selected(lists.iter().position(|l| l.id == todo.list_id).unwrap_or(0) as u32);
 
         let group = adw::PreferencesGroup::new();
@@ -297,15 +298,15 @@ impl Page {
         let page = adw::PreferencesPage::new();
         page.add(&group);
 
-        let cancel = gtk::Button::with_label("Cancelar");
-        let save = gtk::Button::builder().label("Guardar").css_classes(["suggested-action"]).build();
+        let cancel = gtk::Button::with_label(&tr("Cancelar"));
+        let save = gtk::Button::builder().label(tr("Guardar")).css_classes(["suggested-action"]).build();
         let header = adw::HeaderBar::builder().show_end_title_buttons(false).show_start_title_buttons(false).build();
         header.pack_start(&cancel);
         header.pack_end(&save);
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&page));
-        let dialog = adw::Dialog::builder().title("Editar tarea").content_width(460).child(&toolbar).build();
+        let dialog = adw::Dialog::builder().title(tr("Editar tarea")).content_width(460).child(&toolbar).build();
 
         cancel.connect_clicked(glib::clone!(
             #[weak]
@@ -346,7 +347,7 @@ impl Page {
         let Some(Selection::List(id)) = self.selection.get() else { return };
         let Some(list) = self.ctx.check(self.ctx.store.todo_list(id)) else { return };
         let this = self.clone();
-        self.ctx.ask_text("Renombrar lista", &list.name, "Renombrar", move |name| {
+        self.ctx.ask_text(&tr("Renombrar lista"), &list.name, &tr("Renombrar"), move |name| {
             if this.ctx.check(this.ctx.store.rename_todo_list(id, &name)).is_some() {
                 this.refresh();
             }
@@ -358,9 +359,9 @@ impl Page {
         let Some(list) = self.ctx.check(self.ctx.store.todo_list(id)) else { return };
         let this = self.clone();
         self.ctx.confirm(
-            &format!("¿Borrar la lista «{}»?", list.name),
-            &format!("Se borrarán también sus {} tareas.", list.total),
-            "Borrar",
+            &trf("¿Borrar la lista «{name}»?", &[("name", &list.name)]),
+            &trf("Se borrarán también sus {count} tareas.", &[("count", &list.total)]),
+            &tr("Borrar"),
             move || {
                 if this.ctx.check(this.ctx.store.delete_todo_list(id)).is_some() {
                     this.selection.set(Some(Selection::AllPending));
@@ -397,12 +398,12 @@ fn todo_subtitle(todo: &Todo, show_list: bool) -> String {
     if let Some(due) = &todo.due {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let overdue = !todo.done && due.get(..10).is_some_and(|d| d < today.as_str());
-        parts.push(if overdue { format!("⚠ Vencida: {due}") } else { format!("📅 {due}") });
+        parts.push(if overdue { trf("⚠ Vencida: {date}", &[("date", due)]) } else { format!("📅 {due}") });
     }
     match todo.priority {
-        Priority::High => parts.push("Prioridad alta".into()),
-        Priority::Medium => parts.push("Prioridad media".into()),
-        Priority::Low => parts.push("Prioridad baja".into()),
+        Priority::High => parts.push(tr("Prioridad alta")),
+        Priority::Medium => parts.push(tr("Prioridad media")),
+        Priority::Low => parts.push(tr("Prioridad baja")),
         Priority::None => {}
     }
     if let Some(reminder) = todo.reminder_at {

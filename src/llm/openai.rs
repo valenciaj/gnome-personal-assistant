@@ -5,6 +5,7 @@ use anyhow::{Result, bail};
 use serde_json::{Value, json};
 
 use super::{Client, ToolCall, ToolResult, ToolSpec, Turn, json_response};
+use crate::i18n::trf;
 
 pub async fn complete(
     client: &Client,
@@ -34,10 +35,10 @@ pub async fn complete(
     let response = json_response(request.send().await?).await?;
 
     let Some(message) = response.pointer("/choices/0/message") else {
-        bail!("Respuesta sin mensaje: {response}");
+        bail!(trf("Respuesta sin mensaje: {response}", &[("response", &response)]));
     };
     if let Some(refusal) = message["refusal"].as_str() {
-        bail!("El modelo ha rechazado la petición: {refusal}");
+        bail!(trf("El modelo ha rechazado la petición: {reason}", &[("reason", &refusal)]));
     }
 
     let text = message["content"].as_str().unwrap_or_default().to_owned();

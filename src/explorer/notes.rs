@@ -10,9 +10,10 @@ use sourceview5::prelude::*;
 use super::{Ctx, clear_list, local_time, placeholder, select_by_name, sidebar, split, text_row, toolbar_box};
 use crate::conversation_view::markdown_label;
 use crate::store::{NewNote, NoteFilter, NoteUpdate};
+use crate::i18n::{n_, tr, trf};
 
-const ALL_NOTEBOOKS: &str = "Todos los cuadernos";
-const ALL_TAGS: &str = "Todas las etiquetas";
+const ALL_NOTEBOOKS: &str = n_("Todos los cuadernos");
+const ALL_TAGS: &str = n_("Todas las etiquetas");
 
 /// Qué muestra el panel derecho.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -52,15 +53,15 @@ pub struct Page {
 impl Page {
     pub fn new(ctx: Ctx) -> Rc<Self> {
         // ── Panel izquierdo ──
-        let search = gtk::SearchEntry::builder().placeholder_text("Buscar notas").hexpand(true).build();
-        let new_note = gtk::Button::builder().icon_name("document-new-symbolic").tooltip_text("Nueva nota").build();
+        let search = gtk::SearchEntry::builder().placeholder_text(tr("Buscar notas")).hexpand(true).build();
+        let new_note = gtk::Button::builder().icon_name("document-new-symbolic").tooltip_text(tr("Nueva nota")).build();
         let menu = gio::Menu::new();
-        menu.append(Some("Nuevo cuaderno…"), Some("notes.new-notebook"));
-        menu.append(Some("Renombrar cuaderno…"), Some("notes.rename-notebook"));
-        menu.append(Some("Borrar cuaderno…"), Some("notes.delete-notebook"));
+        menu.append(Some(&tr("Nuevo cuaderno…")), Some("notes.new-notebook"));
+        menu.append(Some(&tr("Renombrar cuaderno…")), Some("notes.rename-notebook"));
+        menu.append(Some(&tr("Borrar cuaderno…")), Some("notes.delete-notebook"));
         let notebook_menu = gtk::MenuButton::builder()
             .icon_name("view-more-symbolic")
-            .tooltip_text("Cuadernos")
+            .tooltip_text(tr("Cuadernos"))
             .menu_model(&menu)
             .build();
         let row1 = toolbar_box();
@@ -68,9 +69,9 @@ impl Page {
         row1.append(&new_note);
         row1.append(&notebook_menu);
 
-        let notebooks = gtk::DropDown::from_strings(&[ALL_NOTEBOOKS]);
+        let notebooks = gtk::DropDown::from_strings(&[&tr(ALL_NOTEBOOKS)]);
         notebooks.set_hexpand(true);
-        let tags = gtk::DropDown::from_strings(&[ALL_TAGS]);
+        let tags = gtk::DropDown::from_strings(&[&tr(ALL_TAGS)]);
         tags.set_hexpand(true);
         let row2 = toolbar_box();
         row2.set_margin_top(0);
@@ -86,8 +87,8 @@ impl Page {
 
         // ── Vista de una nota ──
         let view_title = gtk::Label::builder().xalign(0.0).wrap(true).hexpand(true).selectable(true).css_classes(["title-2"]).build();
-        let edit = gtk::Button::builder().icon_name("document-edit-symbolic").tooltip_text("Editar").valign(gtk::Align::Center).build();
-        let delete = gtk::Button::builder().icon_name("user-trash-symbolic").tooltip_text("Borrar").valign(gtk::Align::Center).build();
+        let edit = gtk::Button::builder().icon_name("document-edit-symbolic").tooltip_text(tr("Editar")).valign(gtk::Align::Center).build();
+        let delete = gtk::Button::builder().icon_name("user-trash-symbolic").tooltip_text(tr("Borrar")).valign(gtk::Align::Center).build();
         let view_header = toolbar_box();
         view_header.set_margin_start(12);
         view_header.append(&view_title);
@@ -119,16 +120,16 @@ impl Page {
 
         // ── Edición ──
         let edit_heading = gtk::Label::builder().xalign(0.0).hexpand(true).css_classes(["heading"]).build();
-        let cancel = gtk::Button::builder().label("Cancelar").valign(gtk::Align::Center).build();
-        let save = gtk::Button::builder().label("Guardar").css_classes(["suggested-action"]).valign(gtk::Align::Center).build();
+        let cancel = gtk::Button::builder().label(tr("Cancelar")).valign(gtk::Align::Center).build();
+        let save = gtk::Button::builder().label(tr("Guardar")).css_classes(["suggested-action"]).valign(gtk::Align::Center).build();
         let edit_header = toolbar_box();
         edit_header.set_margin_start(12);
         edit_header.append(&edit_heading);
         edit_header.append(&cancel);
         edit_header.append(&save);
-        let edit_title = gtk::Entry::builder().placeholder_text("Título").build();
-        let edit_notebook = gtk::Entry::builder().placeholder_text("Cuaderno (opcional)").hexpand(true).build();
-        let edit_tags = gtk::Entry::builder().placeholder_text("Etiquetas, separadas por comas").hexpand(true).build();
+        let edit_title = gtk::Entry::builder().placeholder_text(tr("Título")).build();
+        let edit_notebook = gtk::Entry::builder().placeholder_text(tr("Cuaderno (opcional)")).hexpand(true).build();
+        let edit_tags = gtk::Entry::builder().placeholder_text(tr("Etiquetas, separadas por comas")).hexpand(true).build();
         let meta_row = gtk::Box::builder().spacing(6).homogeneous(true).build();
         meta_row.append(&edit_notebook);
         meta_row.append(&edit_tags);
@@ -164,7 +165,7 @@ impl Page {
 
         let detail = gtk::Stack::new();
         detail.add_named(
-            &placeholder("accessories-text-editor-symbolic", "Sin nota", "Elige una nota o crea una nueva."),
+            &placeholder("accessories-text-editor-symbolic", &tr("Sin nota"), &tr("Elige una nota o crea una nueva.")),
             Some("empty"),
         );
         detail.add_named(&view_page, Some("view"));
@@ -277,7 +278,7 @@ impl Page {
             this,
             move |_, _| {
                 let page = this.clone();
-                this.ctx.ask_text("Nuevo cuaderno", "", "Crear", move |name| {
+                this.ctx.ask_text(&tr("Nuevo cuaderno"), "", &tr("Crear"), move |name| {
                     if page.ctx.check(page.ctx.store.create_notebook(&name)).is_some() {
                         page.refresh();
                     }
@@ -395,9 +396,9 @@ impl Page {
         if !note.tags.is_empty() {
             meta.push(note.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" "));
         }
-        meta.push(format!("Creada {}", local_time(note.created)));
+        meta.push(trf("Creada {date}", &[("date", &local_time(note.created))]));
         if note.modified != note.created {
-            meta.push(format!("modificada {}", local_time(note.modified)));
+            meta.push(trf("modificada {date}", &[("date", &local_time(note.modified))]));
         }
         self.view_meta.set_text(&meta.join(" · "));
 
@@ -415,7 +416,7 @@ impl Page {
                 let label = crate::conversation_view::wrapped_label();
                 label.set_text(transcript);
                 label.add_css_class("dim-label");
-                self.view_extra.append(&gtk::Expander::builder().label("Transcripción original").child(&label).build());
+                self.view_extra.append(&gtk::Expander::builder().label(tr("Transcripción original")).child(&label).build());
             }
         }
 
@@ -439,7 +440,7 @@ impl Page {
         match id {
             Some(id) => {
                 let Some(note) = self.ctx.check(self.ctx.store.get_note(id)) else { return };
-                self.edit_heading.set_text("Editar nota");
+                self.edit_heading.set_text(&tr("Editar nota"));
                 self.edit_title.set_text(&note.title);
                 self.edit_notebook.set_text(note.notebook.as_deref().unwrap_or_default());
                 self.edit_tags.set_text(&note.tags.join(", "));
@@ -447,7 +448,7 @@ impl Page {
             }
             None => {
                 self.list.unselect_all();
-                self.edit_heading.set_text("Nueva nota");
+                self.edit_heading.set_text(&tr("Nueva nota"));
                 self.edit_title.set_text("");
                 self.edit_notebook.set_text(&dropdown_choice(&self.notebooks).unwrap_or_default());
                 self.edit_tags.set_text("");
@@ -491,7 +492,7 @@ impl Page {
             self.mode.set(Mode::View(id));
             self.refresh();
             self.show(id);
-            self.ctx.toast("Nota guardada");
+            self.ctx.toast(&tr("Nota guardada"));
         }
     }
 
@@ -500,9 +501,9 @@ impl Page {
         let Some(note) = self.ctx.check(self.ctx.store.get_note(id)) else { return };
         let this = self.clone();
         self.ctx.confirm(
-            &format!("¿Borrar «{}»?", note.title),
-            "La nota y su grabación se borrarán definitivamente.",
-            "Borrar",
+            &trf("¿Borrar «{title}»?", &[("title", &note.title)]),
+            &tr("La nota y su grabación se borrarán definitivamente."),
+            &tr("Borrar"),
             move || {
                 this.stop_media();
                 let store = &this.ctx.store;
@@ -514,7 +515,7 @@ impl Page {
                     }
                     this.set_mode(Mode::Empty);
                     this.refresh();
-                    this.ctx.toast("Nota borrada");
+                    this.ctx.toast(&tr("Nota borrada"));
                 }
             },
         );
@@ -538,7 +539,7 @@ impl Page {
     fn rename_notebook(self: &Rc<Self>) {
         let Some((id, name)) = self.selected_notebook_id() else { return };
         let this = self.clone();
-        self.ctx.ask_text("Renombrar cuaderno", &name, "Renombrar", move |new_name| {
+        self.ctx.ask_text(&tr("Renombrar cuaderno"), &name, &tr("Renombrar"), move |new_name| {
             if this.ctx.check(this.ctx.store.rename_notebook(id, &new_name)).is_some() {
                 this.refresh();
                 select_dropdown(&this.notebooks, &new_name);
@@ -550,9 +551,9 @@ impl Page {
         let Some((id, name)) = self.selected_notebook_id() else { return };
         let this = self.clone();
         self.ctx.confirm(
-            &format!("¿Borrar el cuaderno «{name}»?"),
-            "Sus notas no se borran: se quedan sin cuaderno.",
-            "Borrar",
+            &trf("¿Borrar el cuaderno «{name}»?", &[("name", &name)]),
+            &tr("Sus notas no se borran: se quedan sin cuaderno."),
+            &tr("Borrar"),
             move || {
                 if this.ctx.check(this.ctx.store.delete_notebook(id)).is_some() {
                     this.notebooks.set_selected(0);
@@ -580,7 +581,8 @@ fn dropdown_choice(dropdown: &gtk::DropDown) -> Option<String> {
 /// Rellena un desplegable conservando la opción elegida si sigue existiendo.
 fn refill_dropdown(dropdown: &gtk::DropDown, all: &str, names: &[String]) {
     let current = dropdown_choice(dropdown);
-    let mut items = vec![all];
+    let all = tr(all);
+    let mut items = vec![all.as_str()];
     items.extend(names.iter().map(String::as_str));
     dropdown.set_model(Some(&gtk::StringList::new(&items)));
     let index = current.and_then(|c| names.iter().position(|n| *n == c)).map_or(0, |i| i + 1);
